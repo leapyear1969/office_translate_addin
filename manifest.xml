@@ -107,7 +107,7 @@
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="Translate.Description" DefaultValue="读取并临时替换当前邮件的显示正文。" />
-        <bt:String id="Restore.Description" DefaultValue="使用内存中保存的 HTML 恢复当前邮件显示正文。" />
+        <bt:String id="Restore.Description" DefaultValue="使用缓存的原始 HTML 恢复当前邮件显示正文。" />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

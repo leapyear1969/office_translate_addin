@@ -9,7 +9,11 @@ export interface AsyncErrorLike {
 }
 
 export interface DisplayedBodyLike {
-  setAsync: (...args: any[]) => void;
+  setAsync(
+    data: string,
+    options: Office.AsyncContextOptions & Office.CoercionTypeOptions,
+    callback?: (asyncResult: Office.AsyncResult<void>) => void,
+  ): void;
 }
 
 export function getDisplayedBody(item: unknown): DisplayedBodyLike | null {

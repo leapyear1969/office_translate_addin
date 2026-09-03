@@ -87,7 +87,7 @@ npm run build
 npm run validate
 ```
 
-`npm run validate` 固定使用微软 `office-addin-manifest@1.13.6`。当前 2.1.6 发布在 Node 20 下存在 CommonJS/ESM 传递依赖冲突；这不影响 Office.js 或 add-in 运行。
+`npm run validate` 固定使用微软 `office-addin-manifest@1.13.6`。测试时发现 `office-addin-manifest@2.1.6` 在 Node.js 20.16.0 下存在 CommonJS/ESM 传递依赖冲突；这不影响 Office.js 或 add-in 运行。
 
 ## Manifest URL 对应关系
 
@@ -220,9 +220,10 @@ let originalHtml: string | null = null;
 - 不写回邮件；
 - 不发送到服务器；
 - 不使用 Graph/EWS；
-- 不允许把一封邮件的缓存恢复到另一封具有不同 `itemId` 的邮件。
+- 内存与本地缓存都会核对 `itemId`，不允许把一封邮件的缓存恢复到另一封邮件；
+- 缓存最多保留 1 小时，成功恢复后立即删除。
 
-这是为了让“显示原文”在真实 Outlook 命令生命周期中可运行，而不是改变核心测试目标。浏览器本地缓存可能持续到加载项站点数据被清除；如果这不符合后续生产插件的数据策略，应在正式产品中重新设计，但本 Demo 不会扩展到该范围。
+这是为了让“显示原文”在真实 Outlook 命令生命周期中可运行，而不是改变核心测试目标。如果这仍不符合后续生产插件的数据策略，应在正式产品中重新设计，但本 Demo 不会扩展到该范围。
 
 ## 调试提示
 

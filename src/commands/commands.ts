@@ -7,6 +7,7 @@ import {
 
 const STATUS_NOTIFICATION_KEY = "displayed-body-test-status";
 const ORIGINAL_BODY_STORAGE_PREFIX = "displayed-body-test:original:";
+const ORIGINAL_BODY_CACHE_TTL_MS = 60 * 60 * 1000;
 const UNSUPPORTED_MESSAGE =
   "当前 Outlook / Office.js 环境未提供 DisplayedBody.setAsync。";
 const NO_ORIGINAL_MESSAGE =
@@ -20,16 +21,21 @@ const TEST_HTML = `
 </div>`;
 
 let originalHtml: string | null = null;
+let originalItemId: string | null = null;
+let originalItemReference: Office.MessageRead | null = null;
 
 function getItem(): Office.MessageRead | null {
   return (Office.context?.mailbox?.item as Office.MessageRead | undefined) ?? null;
 }
 
-function getOriginalBodyStorageKey(item: Office.MessageRead): string | null {
+function getItemId(item: Office.MessageRead): string | null {
   const itemId = (item as any).itemId;
-  return typeof itemId === "string" && itemId.length > 0
-    ? `${ORIGINAL_BODY_STORAGE_PREFIX}${itemId}`
-    : null;
+  return typeof itemId === "string" && itemId.length > 0 ? itemId : null;
+}
+
+function getOriginalBodyStorageKey(item: Office.MessageRead): string | null {
+  const itemId = getItemId(item);
+  return itemId ? `${ORIGINAL_BODY_STORAGE_PREFIX}${itemId}` : null;
 }
 
 function cacheOriginalBody(item: Office.MessageRead, html: string): void {
@@ -39,7 +45,7 @@ function cacheOriginalBody(item: Office.MessageRead, html: string): void {
   }
 
   try {
-    localStorage.setItem(key, html);
+    localStorage.setItem(key, JSON.stringify({ html, savedAt: Date.now() }));
   } catch (error) {
     console.warn("Unable to cache the original body in localStorage:", error);
   }
@@ -52,10 +58,43 @@ function loadCachedOriginalBody(item: Office.MessageRead): string | null {
   }
 
   try {
-    return localStorage.getItem(key);
+    const stored = localStorage.getItem(key);
+    if (stored === null) {
+      return null;
+    }
+
+    const parsed = JSON.parse(stored) as { html?: unknown; savedAt?: unknown };
+    if (
+      typeof parsed.html !== "string" ||
+      typeof parsed.savedAt !== "number" ||
+      Date.now() - parsed.savedAt > ORIGINAL_BODY_CACHE_TTL_MS
+    ) {
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    return parsed.html;
   } catch (error) {
     console.warn("Unable to read the original body from localStorage:", error);
+    try {
+      localStorage.removeItem(key);
+    } catch (removeError) {
+      console.warn("Unable to remove invalid original body cache:", removeError);
+    }
     return null;
+  }
+}
+
+function removeCachedOriginalBody(item: Office.MessageRead): void {
+  const key = getOriginalBodyStorageKey(item);
+  if (!key || typeof localStorage === "undefined") {
+    return;
+  }
+
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn("Unable to remove the original body from localStorage:", error);
   }
 }
 
@@ -165,6 +204,8 @@ async function runTestTranslation(): Promise<void> {
   }
 
   originalHtml = await getCurrentBodyHtml(item);
+  originalItemId = getItemId(item);
+  originalItemReference = item;
   cacheOriginalBody(item, originalHtml);
   console.log("Original message body read successfully.");
 
@@ -187,7 +228,17 @@ async function runRestoreOriginal(): Promise<void> {
     return;
   }
 
-  originalHtml ??= loadCachedOriginalBody(item);
+  const currentItemId = getItemId(item);
+  const inMemoryBodyMatchesItem = currentItemId
+    ? originalItemId === currentItemId
+    : originalItemReference === item;
+
+  if (!inMemoryBodyMatchesItem) {
+    originalHtml = loadCachedOriginalBody(item);
+    originalItemId = originalHtml === null ? null : currentItemId;
+    originalItemReference = originalHtml === null ? null : item;
+  }
+
   if (originalHtml === null) {
     await showNotification(NO_ORIGINAL_MESSAGE);
     return;
@@ -201,6 +252,10 @@ async function runRestoreOriginal(): Promise<void> {
   }
 
   await setDisplayedBodyHtml(displayedBody, originalHtml);
+  removeCachedOriginalBody(item);
+  originalHtml = null;
+  originalItemId = null;
+  originalItemReference = null;
   console.log("DisplayedBody.setAsync succeeded; the original body was restored.");
 }
 

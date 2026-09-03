@@ -6,6 +6,7 @@ import {
 } from "./command-logic";
 
 const STATUS_NOTIFICATION_KEY = "displayed-body-test-status";
+const ORIGINAL_BODY_STORAGE_PREFIX = "displayed-body-test:original:";
 const UNSUPPORTED_MESSAGE =
   "当前 Outlook / Office.js 环境未提供 DisplayedBody.setAsync。";
 const NO_ORIGINAL_MESSAGE =
@@ -22,6 +23,40 @@ let originalHtml: string | null = null;
 
 function getItem(): Office.MessageRead | null {
   return (Office.context?.mailbox?.item as Office.MessageRead | undefined) ?? null;
+}
+
+function getOriginalBodyStorageKey(item: Office.MessageRead): string | null {
+  const itemId = (item as any).itemId;
+  return typeof itemId === "string" && itemId.length > 0
+    ? `${ORIGINAL_BODY_STORAGE_PREFIX}${itemId}`
+    : null;
+}
+
+function cacheOriginalBody(item: Office.MessageRead, html: string): void {
+  const key = getOriginalBodyStorageKey(item);
+  if (!key || typeof localStorage === "undefined") {
+    return;
+  }
+
+  try {
+    localStorage.setItem(key, html);
+  } catch (error) {
+    console.warn("Unable to cache the original body in localStorage:", error);
+  }
+}
+
+function loadCachedOriginalBody(item: Office.MessageRead): string | null {
+  const key = getOriginalBodyStorageKey(item);
+  if (!key || typeof localStorage === "undefined") {
+    return null;
+  }
+
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.warn("Unable to read the original body from localStorage:", error);
+    return null;
+  }
 }
 
 export function dumpEnvironmentInfo(): void {
@@ -130,6 +165,7 @@ async function runTestTranslation(): Promise<void> {
   }
 
   originalHtml = await getCurrentBodyHtml(item);
+  cacheOriginalBody(item, originalHtml);
   console.log("Original message body read successfully.");
 
   logDisplayedBodyCapability(item);
@@ -145,12 +181,18 @@ async function runTestTranslation(): Promise<void> {
 
 async function runRestoreOriginal(): Promise<void> {
   dumpEnvironmentInfo();
+  const item = getItem();
+  if (!item) {
+    await showNotification("当前 Outlook 中没有可读取的邮件项目。");
+    return;
+  }
+
+  originalHtml ??= loadCachedOriginalBody(item);
   if (originalHtml === null) {
     await showNotification(NO_ORIGINAL_MESSAGE);
     return;
   }
 
-  const item = getItem();
   logDisplayedBodyCapability(item);
   const displayedBody = getDisplayedBody(item);
   if (!displayedBody) {

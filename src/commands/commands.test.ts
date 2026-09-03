@@ -22,6 +22,7 @@ function installOfficeMock(options: OfficeMockOptions = {}) {
     ) => callback?.({ status: "succeeded" }),
   );
   const item: Record<string, unknown> = {
+    itemId: "message-id-1",
     itemType: "message",
     body: {
       getAsync: jest.fn(
@@ -79,10 +80,17 @@ function invoke(handler: CommandHandler): Promise<void> {
 describe("Outlook commands", () => {
   beforeEach(() => {
     jest.resetModules();
+    const values = new Map<string, string>();
+    (globalThis as any).localStorage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
   });
 
   afterEach(() => {
     delete (globalThis as any).Office;
+    delete (globalThis as any).localStorage;
     jest.restoreAllMocks();
   });
 
@@ -113,6 +121,26 @@ describe("Outlook commands", () => {
     expect(setAsync).toHaveBeenNthCalledWith(
       2,
       "<p>Saved original</p>",
+      { coercionType: "html" },
+      expect.any(Function),
+    );
+  });
+
+  it("restores cached HTML after Outlook creates a new command runtime", async () => {
+    const firstRuntime = installOfficeMock({
+      originalHtml: "<p>Cross-runtime original</p>",
+    });
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
+    await import("./commands");
+    await invoke(firstRuntime.handlers.get("testTranslation")!);
+
+    jest.resetModules();
+    const secondRuntime = installOfficeMock();
+    await import("./commands");
+    await invoke(secondRuntime.handlers.get("restoreOriginal")!);
+
+    expect(secondRuntime.setAsync).toHaveBeenCalledWith(
+      "<p>Cross-runtime original</p>",
       { coercionType: "html" },
       expect.any(Function),
     );

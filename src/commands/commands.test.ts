@@ -135,6 +135,10 @@ describe("Outlook commands", () => {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
       removeItem: (key: string) => values.delete(key),
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      get length() {
+        return values.size;
+      },
     };
   });
 
@@ -235,6 +239,29 @@ describe("Outlook commands", () => {
 
     expect(localStorage.getItem("displayed-body-test:original:message-cleanup"))
       .toBeNull();
+  });
+
+  it("sweeps expired body caches for other messages when a command runs", async () => {
+    const prefix = "displayed-body-test:original:";
+    localStorage.setItem(
+      `${prefix}expired-message`,
+      JSON.stringify({
+        html: "<p>Expired private body</p>",
+        savedAt: Date.now() - 61 * 60 * 1000,
+      }),
+    );
+    localStorage.setItem(
+      `${prefix}valid-message`,
+      JSON.stringify({ html: "<p>Still valid</p>", savedAt: Date.now() }),
+    );
+    const { handlers } = installOfficeMock({ itemId: "current-message" });
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
+    await import("./commands");
+
+    await invoke(handlers.get("testTranslation")!);
+
+    expect(localStorage.getItem(`${prefix}expired-message`)).toBeNull();
+    expect(localStorage.getItem(`${prefix}valid-message`)).not.toBeNull();
   });
 
   it("shows a clear notification when DisplayedBody.setAsync is unavailable", async () => {

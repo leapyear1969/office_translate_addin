@@ -98,6 +98,48 @@ function removeCachedOriginalBody(item: Office.MessageRead): void {
   }
 }
 
+function purgeExpiredOriginalBodyCaches(): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(ORIGINAL_BODY_STORAGE_PREFIX)) {
+        keys.push(key);
+      }
+    }
+
+    for (const key of keys) {
+      try {
+        const stored = localStorage.getItem(key);
+        const parsed = stored
+          ? (JSON.parse(stored) as { html?: unknown; savedAt?: unknown })
+          : null;
+        const isValid =
+          typeof parsed?.html === "string" &&
+          typeof parsed.savedAt === "number" &&
+          Date.now() - parsed.savedAt <= ORIGINAL_BODY_CACHE_TTL_MS;
+
+        if (!isValid) {
+          localStorage.removeItem(key);
+        }
+      } catch (error) {
+        console.warn("Unable to inspect an original body cache:", error);
+        try {
+          localStorage.removeItem(key);
+        } catch (removeError) {
+          console.warn("Unable to remove an invalid body cache:", removeError);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn("Unable to sweep original body caches:", error);
+  }
+}
+
 export function dumpEnvironmentInfo(): void {
   const context = Office.context;
   const mailbox = context?.mailbox;
@@ -196,6 +238,7 @@ function setDisplayedBodyHtml(
 }
 
 async function runTestTranslation(): Promise<void> {
+  purgeExpiredOriginalBodyCaches();
   dumpEnvironmentInfo();
   const item = getItem();
   if (!item) {
@@ -221,6 +264,7 @@ async function runTestTranslation(): Promise<void> {
 }
 
 async function runRestoreOriginal(): Promise<void> {
+  purgeExpiredOriginalBodyCaches();
   dumpEnvironmentInfo();
   const item = getItem();
   if (!item) {

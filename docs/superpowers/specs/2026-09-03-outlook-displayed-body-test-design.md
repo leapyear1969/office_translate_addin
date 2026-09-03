@@ -77,7 +77,7 @@ Manifest 将包含：
 let originalHtml: string | null = null;
 ```
 
-Outlook 不支持 function commands 的 shared runtime，且命令调用 `event.completed()` 后运行时会关闭。为使第二个 Ribbon 命令能够在新的运行时恢复正文，项目同时按当前邮件 `itemId` 将原始 HTML 缓存在同源 `localStorage`。该缓存仅保存在客户端，不修改邮件、不写服务器，也不发送到外部服务；模块内存也记录来源 `itemId`，只有当前邮件匹配时才使用。缓存最多保留 1 小时，并在成功恢复后立即删除。
+Outlook 不支持 function commands 的 shared runtime，且命令调用 `event.completed()` 后运行时会关闭。为使第二个 Ribbon 命令能够在新的运行时恢复正文，项目同时按当前邮件 `itemId` 将原始 HTML 缓存在同源 `localStorage`。该缓存仅保存在客户端，不修改邮件、不写服务器，也不发送到外部服务；模块内存也记录来源 `itemId`，只有当前邮件匹配时才使用。缓存超过 1 小时后不再用于恢复；每次命令启动时惰性删除该加载项前缀下的过期记录，并在成功恢复后立即删除当前记录。由于运行时关闭后没有定时进程，若用户不再运行任何命令，磁盘上的旧记录会保留到下一次命令运行或站点数据被清理。
 
 它公开两个供 Outlook manifest 调用的函数：
 
@@ -111,7 +111,7 @@ Outlook 不支持 function commands 的 shared runtime，且命令调用 `event.
 6. 输出成功或完整失败信息。
 7. 在所有路径中最终调用一次 `event.completed()`。
 
-原文保存在当前 Commands Runtime 的内存中，并按 `itemId` 在同源 `localStorage` 中保留跨命令运行时副本。内存与本地缓存都校验 `itemId`，不同邮件不会互相恢复；本地缓存最多保留 1 小时，并在成功恢复后删除。Outlook 自身会在离开当前邮件后恢复服务器中的原始正文，因为 Preview API 不会持久化修改。
+原文保存在当前 Commands Runtime 的内存中，并按 `itemId` 在同源 `localStorage` 中保留跨命令运行时副本。内存与本地缓存都校验 `itemId`，不同邮件不会互相恢复；本地缓存超过 1 小时后失效，在下一次任一命令启动时惰性清理，并在成功恢复后删除。Outlook 自身会在离开当前邮件后恢复服务器中的原始正文，因为 Preview API 不会持久化修改。
 
 ## 完成回调约束
 

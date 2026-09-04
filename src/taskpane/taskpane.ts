@@ -1,0 +1,208 @@
+import { api, authenticate, Session } from '../shared/api';
+import { bodyHtml, currentItem, isCurrent, showOriginalMessage, translateCurrentMessage } from '../shared/mail';
+import { LANGUAGES, loadSettings, saveSettings, Settings, shouldOfferTranslation } from '../shared/settings';
+
+const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const target = element<HTMLSelectElement>('target-language');
+const excluded = element<HTMLSelectElement>('excluded-languages');
+const picker = element<HTMLSelectElement>('new-language');
+let settings: Settings;
+let session: Session | undefined;
+let epoch = 0;
+let loginEpoch = 0;
+let actionEpoch = 0;
+let offeredItem: Office.MessageRead | undefined;
+let translating = false;
+let restoring = false;
+let preserveOriginal = false;
+let dirty = false;
+function updateMessageActions() {
+  element('translate-message').textContent = `将邮件翻译为：${LANGUAGES[settings.target]}`;
+  const disabled = translating || restoring || !currentItem();
+  ['show-original', 'translate-message', 'translate-now'].forEach(id => { element<HTMLButtonElement>(id).disabled = disabled; });
+}
+function status(message: string, error = false) {
+  element('status').textContent = message;
+  element('status').classList.toggle('error', error);
+}
+function fillLanguages(select: HTMLSelectElement) {
+  Object.entries(LANGUAGES).forEach(([code, label]) => select.add(new Option(label, code)));
+}
+function renderExcluded(codes: string[]) {
+  excluded.replaceChildren(...codes.map(code => new Option(LANGUAGES[code], code)));
+  element('empty-languages').hidden = codes.length > 0;
+  element<HTMLButtonElement>('remove-language').disabled = excluded.selectedIndex < 0;
+}
+function markDirty() { dirty = true; element('save-status').textContent = '尚未保存'; }
+function currentForm(): Settings {
+  return { mode: (document.querySelector<HTMLInputElement>('input[name=mode]:checked')!.value as Settings['mode']),
+    target: target.value, excluded: Array.from(excluded.options).map(option => option.value) };
+}
+async function inspectMessage() {
+  const ownEpoch = ++epoch;
+  offeredItem = undefined;
+  element('translation-prompt').hidden = true;
+  const item = currentItem();
+  if (!session || !item || settings.mode === 'never' || preserveOriginal) return;
+  try {
+    status('正在识别邮件语言…');
+    const html = await bodyHtml(item);
+    if (ownEpoch !== epoch || !isCurrent(item)) return;
+    const detected = await api<{ language: string; score: number } | null>('/api/detect', session.token, { html });
+    if (ownEpoch !== epoch || !isCurrent(item)) return;
+    if (!detected || !shouldOfferTranslation(settings, detected.language, detected.score)) { status('当前邮件无需自动翻译。'); return; }
+    offeredItem = item;
+    if (settings.mode === 'always') await translateOffered();
+    else {
+      element('prompt-message').textContent = `这封邮件使用${LANGUAGES[detected.language] || detected.language}，是否翻译为${LANGUAGES[settings.target]}？`;
+      element('translation-prompt').hidden = false;
+      status('');
+    }
+  } catch (error) { if (ownEpoch === epoch) status((error as Error).message, true); }
+}
+async function translateOffered() {
+  if (offeredItem) await translateItem(offeredItem);
+}
+async function translateItem(item: Office.MessageRead | null) {
+  if (!item || translating || restoring) return;
+  const ownEpoch = ++epoch;
+  const ownAction = ++actionEpoch;
+  preserveOriginal = false;
+  translating = true;
+  updateMessageActions();
+  try {
+    status('正在翻译整封邮件…');
+    // Reacquire SSO for each translation rather than retain expired access tokens.
+    await translateCurrentMessage(settings.target, undefined, item);
+    if (ownEpoch === epoch) { element('translation-prompt').hidden = true; status('翻译完成。点击提示栏或此面板中的“显示原文”即可恢复原文。'); }
+  } catch (error) { if (ownEpoch === epoch) status((error as Error).message, true); }
+  finally { if (ownAction === actionEpoch) { translating = false; updateMessageActions(); } }
+}
+async function restoreOriginal() {
+  if (translating || restoring) return;
+  const ownEpoch = ++epoch;
+  const ownAction = ++actionEpoch;
+  preserveOriginal = true;
+  offeredItem = undefined;
+  element('translation-prompt').hidden = true;
+  restoring = true;
+  updateMessageActions();
+  status('正在显示原文…');
+  try {
+    await showOriginalMessage();
+    if (ownEpoch === epoch) status('已显示原文。');
+  } catch (error) { if (ownEpoch === epoch) status((error as Error).message, true); }
+  finally { if (ownAction === actionEpoch) { restoring = false; updateMessageActions(); } }
+}
+async function handleInitializationContext(data: unknown) {
+  try {
+    const context = typeof data === 'string' ? JSON.parse(data) : data;
+    if (context?.action === 'showOriginal') await restoreOriginal();
+  } catch { /* Empty or unrelated launch data is not a mail action. */ }
+}
+function registerInitializationHandler() {
+  const item = currentItem();
+  if (!item || !Office.EventType.InitializationContextChanged || typeof item.addHandlerAsync !== 'function') return;
+  item.addHandlerAsync(Office.EventType.InitializationContextChanged, (event: Office.InitializationContextChangedEventArgs) => {
+    if (isCurrent(item)) void handleInitializationContext(event.initializationContextData);
+  }, () => {});
+}
+function readInitializationContext(): Promise<void> {
+  const item = currentItem();
+  if (!item || typeof item.getInitializationContextAsync !== 'function') return Promise.resolve();
+  return new Promise(resolve => {
+    item.getInitializationContextAsync(result => {
+      if (result.status === Office.AsyncResultStatus.Succeeded && isCurrent(item)) {
+        void handleInitializationContext(result.value).then(resolve);
+      } else resolve();
+    });
+  });
+}
+async function signIn(interactive: boolean) {
+  const attempt = ++loginEpoch;
+  element<HTMLButtonElement>('signin').disabled = true;
+  element('account-name').textContent = '正在读取登录账户…';
+  try {
+    const authenticated = await authenticate(interactive);
+    if (attempt !== loginEpoch) return;
+    session = authenticated;
+    element('account-name').textContent = session.user.displayName || '已登录';
+    element('account-email').textContent = session.user.mail;
+    element('signin').hidden = false;
+    if (!preserveOriginal) { status(''); await inspectMessage(); }
+  } catch (error) {
+    if (attempt !== loginEpoch) return;
+    session = undefined;
+    element('account-name').textContent = '尚未完成登录';
+    element('account-email').textContent = '';
+    element('signin').hidden = false;
+    if (!preserveOriginal) status((error as Error).message, true);
+  } finally { if (attempt === loginEpoch) element<HTMLButtonElement>('signin').disabled = false; }
+}
+
+fillLanguages(target); fillLanguages(picker); target.value = 'zh-Hans';
+element('signin').addEventListener('click', () => void signIn(true));
+element('preferences').addEventListener('change', event => {
+  if (event.target !== excluded && event.target !== picker) markDirty();
+});
+excluded.addEventListener('change', () => { element<HTMLButtonElement>('remove-language').disabled = excluded.selectedIndex < 0; });
+element('add-language').addEventListener('click', () => {
+  element('language-picker').hidden = false;
+  Array.from(picker.options).forEach(option => { option.disabled = Array.from(excluded.options).some(existing => existing.value === option.value); });
+  picker.value = Array.from(picker.options).find(option => !option.disabled)?.value || '';
+  element<HTMLButtonElement>('confirm-language').disabled = !picker.value;
+  picker.focus();
+});
+element('cancel-language').addEventListener('click', () => { element('language-picker').hidden = true; element('add-language').focus(); });
+element('confirm-language').addEventListener('click', () => {
+  const codes = currentForm().excluded;
+  if (picker.value && !codes.includes(picker.value)) { renderExcluded([...codes, picker.value]); markDirty(); }
+  element('language-picker').hidden = true;
+  element('add-language').focus();
+});
+element('remove-language').addEventListener('click', () => {
+  if (excluded.selectedIndex >= 0) { renderExcluded(currentForm().excluded.filter(code => code !== excluded.value)); markDirty(); }
+});
+element('preferences').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!dirty) { element('save-status').textContent = '设置已保存'; return; }
+  const fields = element<HTMLFieldSetElement>('settings-fields');
+  fields.disabled = true;
+  try {
+    const next = currentForm();
+    await saveSettings(next); settings = next; dirty = false;
+    updateMessageActions();
+    element('save-status').textContent = '设置已保存';
+    await inspectMessage();
+  } catch (error) { element('save-status').textContent = (error as Error).message; }
+  finally { fields.disabled = false; }
+});
+element('translate-now').addEventListener('click', () => void translateOffered());
+element('translate-message').addEventListener('click', () => void translateItem(currentItem()));
+element('show-original').addEventListener('click', () => void restoreOriginal());
+element('dismiss').addEventListener('click', () => { offeredItem = undefined; element('translation-prompt').hidden = true; });
+
+Office.onReady(info => {
+  if (info.host !== Office.HostType.Outlook) return;
+  settings = loadSettings();
+  target.value = settings.target;
+  document.querySelector<HTMLInputElement>(`input[name=mode][value=${settings.mode}]`)!.checked = true;
+  renderExcluded(settings.excluded);
+  updateMessageActions();
+  element<HTMLFieldSetElement>('settings-fields').disabled = false;
+  Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
+    ++epoch;
+    // An old item's in-flight operation must not lock or unlock the new item's UI.
+    ++actionEpoch;
+    translating = false;
+    restoring = false;
+    preserveOriginal = false;
+    offeredItem = undefined;
+    element('translation-prompt').hidden = true;
+    updateMessageActions();
+    registerInitializationHandler();
+    void signIn(false);
+  }, result => { if (result.status !== Office.AsyncResultStatus.Succeeded) status('当前客户端无法监听邮件切换，请重新打开面板以识别新邮件。'); });
+  registerInitializationHandler();
+  void readInitializationContext().then(() => signIn(false));
+});

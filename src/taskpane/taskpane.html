@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>翻译选项</title>
+  <script src="https://appsforoffice.microsoft.com/lib/beta/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+  <main>
+    <h1><img class="heading-icon" src="assets/icon-32.png" width="24" height="24" alt="">翻译选项</h1>
+    <section class="account" aria-label="当前账户">
+      <div class="account-details">
+        <p id="account-name">请在 Outlook 中打开此面板</p>
+        <p id="account-email" class="muted"></p>
+      </div>
+      <button id="signin" type="button" hidden>重新登录</button>
+    </section>
+    <section class="message-actions" aria-label="当前邮件操作">
+      <button id="show-original" type="button" disabled>显示原文</button>
+      <button id="translate-message" type="button" class="primary" disabled>将邮件翻译为：中文（简体）</button>
+    </section>
+    <form id="preferences">
+      <fieldset id="settings-fields" disabled>
+        <legend>收到其他语言的邮件时：</legend>
+        <label class="radio"><input type="radio" name="mode" value="always">始终翻译</label>
+        <label class="radio"><input type="radio" name="mode" value="ask" checked>翻译前询问我</label>
+        <label class="radio"><input type="radio" name="mode" value="never">从不自动翻译</label>
+        <p class="hint">自动翻译和询问仅在此面板保持打开时生效。手动点击“翻译邮件”始终可以翻译全文。</p>
+        <div class="target-row"><label for="target-language">将邮件翻译为：</label><select id="target-language" name="target"></select></div>
+        <label for="excluded-languages" class="list-label">不提示翻译以下语言的邮件：</label>
+        <div class="language-manager">
+          <select id="excluded-languages" size="6" aria-describedby="empty-languages"></select>
+          <div class="language-actions"><button type="button" id="add-language">添加语言…</button><button type="button" id="remove-language" disabled>删除</button></div>
+        </div>
+        <p id="empty-languages" class="hint">尚未添加语言。</p>
+        <div id="language-picker" hidden>
+          <label for="new-language">选择要添加的语言</label>
+          <div class="picker-row"><select id="new-language"></select><button type="button" id="confirm-language">添加</button><button type="button" id="cancel-language">取消</button></div>
+        </div>
+        <div class="footer"><button class="primary" type="submit" id="save">保存设置</button><span id="save-status" role="status" aria-live="polite"></span></div>
+      </fieldset>
+    </form>
+    <section id="translation-prompt" hidden aria-label="翻译提示">
+      <p id="prompt-message"></p>
+      <button type="button" id="translate-now" class="primary">翻译这封邮件</button>
+      <button type="button" id="dismiss">暂不翻译</button>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+  </main>
+</body>
+</html>

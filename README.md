@@ -1,84 +1,68 @@
-# Outlook DisplayedBody.setAsync 验证 Demo
+# Outlook 邮件翻译插件
 
-这是一个最小 Outlook Office.js Add-in，用来验证 Microsoft 365 世纪互联邮箱在 **Message Read / 阅读邮件** 场景中是否提供 Preview API：
+阅读邮件时点击“翻译”菜单中的“翻译邮件”，将整封正文翻译为设置的目标语言并直接显示在正文位置。服务器原始邮件不被修改；重新打开邮件即可查看原文。另一个菜单项“翻译选项”打开 taskpane.html。
 
-```text
-Office.context.mailbox.item.display.body.setAsync()
-```
+## 本地运行
 
-它只有两个 Ribbon 按钮：
-
-- **测试原文翻译**：读取当前邮件 HTML，并把正文原显示区域临时替换为固定测试内容。
-- **显示原文**：用此前缓存的 HTML 恢复当前邮件的显示正文。
-
-这个项目不会修改服务器邮件，不使用 Microsoft Graph、EWS、VSTO、COM、任务窗格或任何翻译/API 服务。`DisplayedBody.setAsync` 设置的内容只在当前显示中生效；切换邮件或关闭当前邮件后，Outlook 仍显示服务器中的原始正文。
-
-## 重要结论与限制
-
-`DisplayedBody.setAsync` 截至 2026-09-03 仍是 **Mailbox Preview** API。微软官方文档要求使用 Office.js Preview 库，并明确说明 Preview requirement set 不应写入 manifest，因为客户端不会可靠报告该集合。
-
-本项目使用：
-
-```text
-https://appsforoffice.microsoft.com/lib/beta/hosted/office.js
-```
-
-微软公开记录的三个相关地址是：
-
-| 用途 | URL |
-|---|---|
-| Global 正式版 | `https://appsforoffice.microsoft.com/lib/1/hosted/office.js` |
-| Global Preview/Beta | `https://appsforoffice.microsoft.com/lib/beta/hosted/office.js` |
-| 世纪互联正式版 | `https://appsforoffice.cdn.partner.office365.cn/appsforoffice/lib/1/hosted/office.js` |
-
-微软没有公开记录世纪互联专用的 Preview/Beta 地址。因此，本次测试依赖以下两个条件：
-
-1. 世纪互联 Outlook 客户端实际实现 `DisplayedBody.setAsync`。
-2. 客户端所在网络能够加载 Global Beta CDN。
-
-如果 Office.js 加载失败，不能据此判定 API 不受支持；请先用浏览器或开发者工具确认 Global Beta URL 能成功访问。若 Office.js 已初始化，但运行时日志显示 `typeof item.display?.body?.setAsync === "undefined"`，才能判定当前客户端环境没有暴露该 API。
-
-## 环境要求
-
-- Node.js 18 或更高版本（已在 Node.js 20.16.0 验证）。
-- npm。
-- 可登录目标世纪互联租户的 Outlook 客户端或 Outlook on the web。
-- 本机可以信任开发 HTTPS 证书。
-- 网络策略允许访问 `https://localhost:3000` 和 Global Office.js Beta CDN。
-
-## 安装依赖
-
-在项目根目录运行：
+需要 Node.js 20.16 或更高版本。
 
 ```powershell
 npm install
+npm run build
+npm start
 ```
 
-安装并信任 Microsoft Office Add-in 本地开发证书：
+开发时使用 `npm run dev-server`，同时提供 Webpack 页面和后端 API。不要同时启动两个服务，它们共用 3000 端口。服务地址为 https://localhost:3000，使用 Office 开发证书。浏览器只可预览设置布局，登录、设置保存和翻译需在 Outlook 中测试。
 
-```powershell
-npx office-addin-dev-certs install
-```
+项目已创建 `.env` 并写入用户提供的翻译 Key。`.env` 和用户原有的 `.local` 均被 Git 忽略。新环境请从 `.env.example` 复制后填写，不要覆盖已有密钥。
 
-Windows 可能显示证书信任或管理员确认窗口，请按提示接受。证书只用于本机 `localhost` 开发。
+## Entra 应用配置（世纪互联）
 
-## 开发运行
+- Tenant ID：`d7125684-0e28-40b5-aba2-ea9580f2a201`
+- Client ID：`59a13c0d-6f19-4c66-b8fd-2fa80d0186bc`
+- Web Redirect URI：`https://localhost:3000`
+- Application ID URI：`api://localhost:3000/59a13c0d-6f19-4c66-b8fd-2fa80d0186bc`
+- 公开委托权限 `access_as_user`，按微软 Office SSO 文档预授权 Office 客户端。
+- Microsoft Graph 委托权限 `User.Read`，完成所需的管理员同意。
+- 在 `.env` 的 `CLIENT_SECRET` 填入该新应用客户端密钥的**值**，不是密钥 ID，然后重启服务。
 
-启动本地 HTTPS Web Server：
+Redirect URI 和 Application ID URI 不同。当前实现使用 Office SSO → 后端 JWT 签名/发行者/受众/租户/权限验证 → MSAL OBO → 中国区 Graph `/me`，不使用浏览器授权码回调，也没有跳过认证的开发接口。前端每次手动翻译会先获取并验证登录用户信息。SSO 不可用时会明确报错，不冒用邮箱地址作为认证结果。
 
-```powershell
-npm run dev-server
-```
+`AUTHORITY` 默认 `https://login.partner.microsoftonline.cn`，`GRAPH_BASE` 默认 `https://microsoftgraph.chinacloudapi.cn`，与参考项目一致。
 
-服务地址：
+参考：[Office SSO 配置](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/use-sso-to-get-office-signed-in-user-token)。
 
-```text
-https://localhost:3000/commands.html
-```
+## 翻译配置与行为
 
-先在浏览器中打开这个地址，确认没有证书警告。页面本身是空白的，这是预期行为；它是无 UI 的 Commands FunctionFile，不是任务窗格。
+| .env 字段 | 用途 |
+|---|---|
+| TRANSLATOR_ENDPOINT | 默认 https://api.translator.azure.cn/ |
+| TRANSLATOR_KEY | 翻译资源 Key，仅后端读取 |
+| TRANSLATOR_REGION | 资源需要区域认证时，填写门户中准确的区域代码 |
+| APP_BASE_URL | 插件 HTTPS 地址，用于清单生成与 API 来源检查 |
+| SSO_RESOURCE | Entra 应用中实际的 Application ID URI |
 
-其他命令：
+翻译时保留 HTML 元素及属性，只提交可见文本节点；表格、链接、CID 图片和样式不会作为普通文字翻译。script、style、head、noscript、translate=no 和 notranslate 区域跳过。不同 HTML 文本节点分别翻译，因此跨行内标签的句子连贯性可能不如单段纯文本。附件、图片内文字和邮件主题不翻译。
+
+每批最多 45,000 字符、100 段，每段最多 4,500 UTF-16 单元；大邮件分批完成后才应用译文。输入/输出上限为 1,000,000 字符。译文通过文本节点赋值，尖括号等内容会正确转义。失败或邮件切换时不应用未完成的译文。不把正文、令牌或密钥写入日志或 localStorage。
+
+已使用 chinanorth3 区域通过真实 Azure 样例验证：语言检测识别为英语，英文成功译为简体中文，表格样式、链接和 CID 图片引用保留。此前的 401001 认证错误已随区域配置补齐解决。真实 Outlook SSO 和正文显示仍需在客户端验收。
+
+参考：[Azure China Translator API](https://docs.azure.cn/en-us/ai-services/translator/text-translation/reference/v3/translate)、[服务限制](https://docs.azure.cn/en-us/ai-services/translator/service-limits)。
+
+## 翻译选项
+
+默认“翻译前询问我”，目标为简体中文。设置通过 Outlook roamingSettings 保存，含目标语言、翻译模式和不提示翻译的语言列表。
+
+“始终翻译”和“翻译前询问我”只在选项面板打开时检查当前邮件，并在支持固定面板的客户端通过 ItemChanged 检查新邮件。需要跨邮件使用时请固定面板。面板关闭后不会在后台自动翻译。语言检测置信度低于 0.7、目标语言相同、命中排除列表、选择“从不自动翻译”时不会自动翻译。手动点击“翻译邮件”不受自动偏好限制。
+
+`DisplayedBody.setAsync` 仍使用 Office.js Preview，支持范围以客户端实际能力为准；保留本项目已经测试可用的 beta CDN。
+
+## 安装新清单
+
+重新旁加载项目根目录 `manifest.xml`（版本 1.1.0.0）。沿用原插件 ID，因此升级已有安装即可；若仍显示旧按钮，移除旧测试插件后加载新清单。新清单包含 v1.1 WebApplicationInfo 和两个菜单项。
+
+## 验证
 
 ```powershell
 npm test -- --runInBand
@@ -87,158 +71,14 @@ npm run build
 npm run validate
 ```
 
-`npm run validate` 固定使用微软 `office-addin-manifest@1.13.6`。测试时发现 `office-addin-manifest@2.1.6` 在 Node.js 20.16.0 下存在 CommonJS/ESM 传递依赖冲突；这不影响 Office.js 或 add-in 运行。
+自动测试使用伪造 Office 环境、签名测试令牌和模拟翻译服务，不代表实际租户 SSO 已通过。真实验收见 `TEST_CHECKLIST.md`。
 
-## Manifest URL 对应关系
+## 移到服务器
 
-[manifest.xml](./manifest.xml) 中的本地地址均为 `https://localhost:3000`：
+1. 在服务器部署本项目，安全配置 `.env`，安装依赖并构建。
+2. 修改 `APP_BASE_URL` 和 Entra `SSO_RESOURCE`，同步更新应用的 Application ID URI、Office 预授权及需要的重定向地址。
+3. 执行 `npm run build` 重新生成清单，重新安装更新后的 `manifest.xml`。
+4. 推荐设置 `NODE_ENV=production`，由反向代理终止 HTTPS 并转发到 `127.0.0.1:PORT`。也可配置 `SSL_CERT_PATH` 和 `SSL_KEY_PATH` 直接提供 HTTPS。
+5. 重启 Node 服务。不要把 `.env`、源目录或密钥当静态资源发布；本服务器仅发布 `dist`。
 
-- 基础 manifest 的 `SourceLocation`：`https://localhost:3000/commands.html`
-- `FunctionFile resid="Commands.Url"`：引用资源 `Commands.Url`
-- `Commands.Url`：`https://localhost:3000/commands.html`
-- 图标：`https://localhost:3000/assets/icon-16.png`、`icon-32.png`、`icon-80.png`
-
-如果端口或主机名改变，必须同时修改 `manifest.xml` 和 `webpack.config.js`，然后重新安装 manifest。
-
-## 切换 Office.js URL
-
-Office.js 地址位于：
-
-```text
-src/commands/commands.html
-```
-
-本测试默认使用 Global Beta。若只想对比正式版，可以把 `<script src>` 临时改成世纪互联正式地址后重启 dev server。正式版很可能没有 `DisplayedBody`，这正是对照结果，不代表加载项基础能力异常。
-
-不要猜测或使用未经微软记录的世纪互联 `/beta/` 地址。
-
-## 安装 XML Manifest
-
-本项目使用 add-in-only XML manifest。微软当前通用手工安装流程是打开 **Add-Ins for Outlook / Outlook 加载项** 对话框，进入 **My add-ins / 我的加载项**，在 **Custom Addins / 自定义加载项** 中选择 **Add from File / 从文件添加**，然后选择本项目的 `manifest.xml`。
-
-微软的快捷入口是：
-
-```text
-https://aka.ms/olksideload
-```
-
-如果该 Global 快捷入口不能正确进入世纪互联租户，请从你的世纪互联 Outlook/OWA 内部打开加载项管理界面，或让租户管理员集中部署这份 XML。世纪互联等主权云可能禁用用户自助安装，且公共 Microsoft 365 商店不可用；这时必须由管理员通过租户支持的集中部署入口上传 manifest，并确认本地 Web 服务和 Global Beta CDN 已被网络策略允许。
-
-### 经典 Outlook for Windows
-
-1. 保持 `npm run dev-server` 运行。
-2. 在 Outlook 中选择 **文件 → 信息 → 管理加载项**；该入口会在浏览器打开当前邮箱对应的加载项对话框。
-3. 进入 **我的加载项 → 自定义加载项 → 从文件添加**。
-4. 选择 `manifest.xml` 并接受安装提示。
-5. 回到 Outlook，打开一封已收到的邮件。
-
-微软说明：经典 Outlook 手工 sideload 后可能因缓存最多延迟 24 小时显示。通常重启 Outlook、重新打开邮件或清理 Office 加载项缓存会更快刷新。
-
-### New Outlook for Windows
-
-1. 保持 `npm run dev-server` 运行。
-2. 使用 `https://aka.ms/olksideload`，或从新 Outlook 的 **Apps/应用** 区域进入加载项管理。
-3. 在 **我的加载项 → 自定义加载项 → 从文件添加** 中上传 `manifest.xml`。
-4. 打开一封收到的邮件，在邮件操作栏、Ribbon 或 **Apps/应用** 溢出菜单中查找两个命令。
-
-### Outlook on the web
-
-1. 登录目标世纪互联 OWA，而不是 Global Microsoft 365 账户。
-2. 从 OWA 的 **Apps/应用** 或加载项管理入口打开 **我的加载项**；若租户允许，也可以尝试 `https://aka.ms/olksideload`。
-3. 选择 **自定义加载项 → 从文件添加** 并上传 `manifest.xml`。
-4. 打开一封收到的邮件，在 Ribbon、邮件操作栏或 **Apps/应用** 菜单中查找命令。
-
-安装一次后，同一邮箱的受支持 Outlook 客户端通常会同步显示该加载项，但世纪互联租户策略和客户端缓存可能导致差异。应分别记录每个客户端的实际结果。
-
-微软参考：
-
-- [Sideload Outlook add-ins for testing](https://learn.microsoft.com/en-us/office/dev/add-ins/outlook/sideload-outlook-add-ins-for-testing)
-- [Guidance for deploying Office Add-ins on sovereign clouds](https://learn.microsoft.com/en-us/office/dev/add-ins/publish/government-cloud-guidance)
-- [Office.DisplayedBody API](https://learn.microsoft.com/en-us/javascript/api/outlook/office.displayedbody?view=outlook-js-preview)
-- [Outlook Preview requirement set](https://learn.microsoft.com/en-us/javascript/api/requirement-sets/outlook/outlook-requirement-set-preview?view=common-js-preview)
-
-## 测试步骤
-
-1. 运行 `npm run dev-server`，保持本地 HTTPS 服务运行。
-2. 安装 `manifest.xml`。
-3. 打开或重启 Outlook。
-4. 打开一封已经收到的 HTML 邮件，确保处于阅读模式且只选择一封邮件。
-5. 点击 **测试原文翻译**。
-6. 检查正文原显示区域是否直接变成“翻译测试成功”。
-7. 点击 **显示原文**。
-8. 检查原邮件正文是否恢复。
-9. 使用 Outlook/浏览器开发者工具保存 console 输出。
-
-详细步骤见 [TEST_CHECKLIST.md](./TEST_CHECKLIST.md)。
-
-## 如何判断结果
-
-### 成功
-
-以下三项必须同时满足：
-
-```text
-item.display.body.setAsync 存在
-setAsync 回调返回 Succeeded
-邮件正文原显示区域被替换
-```
-
-恢复按钮也应把同一封邮件恢复为测试前读取的 HTML。
-
-### API 不支持
-
-Outlook 中显示：
-
-```text
-当前 Outlook / Office.js 环境未提供 DisplayedBody.setAsync。
-```
-
-console 中的 `typeof item.display?.body?.setAsync` 为 `undefined`。
-
-### 调用失败
-
-console 会输出：
-
-```text
-error.code
-error.name
-error.message
-```
-
-请记录这些字段，不要只记录“按钮没反应”。
-
-## 原文缓存机制
-
-代码仍使用用户要求的模块变量：
-
-```typescript
-let originalHtml: string | null = null;
-```
-
-但 Outlook 不支持 function commands 的 shared runtime。每次命令在调用 `event.completed()` 后，浏览器运行时可以立即关闭，第二个按钮不能可靠读取前一次调用的模块内存。因此项目还把原 HTML 按 `itemId` 写入同源 `localStorage`，仅作为跨命令运行时的客户端缓存：
-
-- 不写回邮件；
-- 不发送到服务器；
-- 不使用 Graph/EWS；
-- 内存与本地缓存都会核对 `itemId`，不允许把一封邮件的缓存恢复到另一封邮件；
-- 缓存超过 1 小时后不再允许用于恢复；每次任一命令启动时会惰性扫描并删除过期记录，成功恢复后也立即删除当前记录。
-
-这是为了让“显示原文”在真实 Outlook 命令生命周期中可运行，而不是改变核心测试目标。由于 Outlook 关闭命令运行时后没有定时清理进程，超过一小时的记录会在下一次运行任一命令时物理删除；如果之后再也不运行本加载项，则需要通过清理该站点数据删除磁盘上的旧记录。如果这不符合后续生产插件的数据策略，应在正式产品中重新设计，但本 Demo 不会扩展到该范围。
-
-## 调试提示
-
-每次命令都会输出：
-
-```text
-Office.context.host
-Office.context.platform
-Office.context.mailbox.diagnostics.hostName
-Office.context.mailbox.diagnostics.hostVersion
-Office.context.mailbox.diagnostics.OWAView
-Office.context.mailbox.item.itemType
-Office.context.mailbox.item.display
-Office.context.mailbox.item.display?.body
-typeof item.display?.body?.setAsync
-```
-
-若 Ribbon 按钮完全不出现，优先检查 manifest 安装、Message Read 场景、客户端缓存和租户策略。若按钮出现但没有日志，检查 `commands.html`、`commands.js` 以及 Global Beta CDN 的网络加载状态。
+后端限流当前为每 IP 每分钟 60 次。生产环境多个实例或反向代理需要按实际网络配置共享限流存储与代理信任，当前本地默认不信任转发头。

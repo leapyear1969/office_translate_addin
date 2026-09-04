@@ -1,0 +1,15 @@
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+function readConfig(env = process.env) {
+  return {
+    origin: (env.APP_BASE_URL || 'https://localhost:3000').replace(/\/$/, ''),
+    port: Number(env.PORT || 3000),
+    tenantId: env.TENANT_ID || '', clientId: env.CLIENT_ID || '',
+    clientSecret: env.CLIENT_SECRET || '', resource: env.SSO_RESOURCE || '',
+    authority: (env.AUTHORITY || 'https://login.partner.microsoftonline.cn').replace(/\/$/, ''),
+    graphBase: (env.GRAPH_BASE || 'https://microsoftgraph.chinacloudapi.cn').replace(/\/$/, ''),
+    translatorEndpoint: env.TRANSLATOR_ENDPOINT || 'https://api.translator.azure.cn/',
+    translatorKey: env.TRANSLATOR_KEY || '', translatorRegion: env.TRANSLATOR_REGION || '',
+  };
+}
+module.exports = { readConfig };

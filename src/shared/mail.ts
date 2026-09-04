@@ -8,11 +8,22 @@ export function isCurrent(item: Office.MessageRead): boolean {
   const selected = currentItem();
   return !!selected && (item.itemId ? item.itemId === selected.itemId : item === selected);
 }
+function officeCall<T>(invoke: (callback: (result: Office.AsyncResult<T>) => void) => void,
+  failureMessage: string, timeoutMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutMessage)), 15000);
+    try {
+      invoke(result => {
+        clearTimeout(timer);
+        if (result.status === Office.AsyncResultStatus.Succeeded) resolve(result.value);
+        else reject(new Error(`${failureMessage}${result.error?.code ? `（${result.error.code}）` : ''}`));
+      });
+    } catch (error) { clearTimeout(timer); reject(error); }
+  });
+}
 export function bodyHtml(item: Office.MessageRead): Promise<string> {
-  return new Promise((resolve, reject) => item.body.getAsync(Office.CoercionType.Html, result => {
-    if (result.status === Office.AsyncResultStatus.Succeeded) resolve(result.value);
-    else reject(new Error('读取邮件正文失败，请重新打开邮件。'));
-  }));
+  return officeCall(callback => item.body.getAsync(Office.CoercionType.Html, callback),
+    '读取邮件正文失败，请重新打开邮件。', '读取邮件正文超时，请重新打开邮件后重试。');
 }
 export function notify(item: Office.MessageRead, message: string, error = false): void {
   if (!isCurrent(item)) return;
@@ -33,10 +44,8 @@ export async function showOriginalMessage(): Promise<void> {
   // including when this action starts in a fresh task-pane runtime.
   const html = await bodyHtml(item);
   if (!isCurrent(item)) throw new Error('邮件已切换，请在当前邮件上重新点击“显示原文”。');
-  await new Promise<void>((resolve, reject) => displayed.setAsync(html, { coercionType: Office.CoercionType.Html }, result => {
-    if (result.status === Office.AsyncResultStatus.Succeeded) resolve();
-    else reject(new Error('原文显示失败，请重试或重新打开邮件。'));
-  }));
+  await officeCall<void>(callback => displayed.setAsync(html, { coercionType: Office.CoercionType.Html }, callback),
+    '原文显示失败，请重试或重新打开邮件。', '显示原文超时：Outlook 正文显示接口未响应，请重新打开邮件查看原文。');
   notify(item, '已显示原文。');
 }
 
@@ -64,18 +73,23 @@ export async function translateCurrentMessage(target: string, session?: Session,
   if (running.has(key)) throw new Error('当前邮件正在翻译，请稍候。');
   running.add(key);
   try {
-    notify(item, '正在登录并翻译整封邮件…');
+    notify(item, '正在登录…');
     const authenticated = session || await authenticate();
     if (!isCurrent(item)) throw new Error('邮件已切换，已取消应用译文。');
+    notify(item, '正在读取邮件正文…');
     const html = await bodyHtml(item);
     if (!html.trim()) throw new Error('这封邮件没有可翻译的正文。');
+    notify(item, '正在翻译整封邮件…');
     const result = await api<{ html: string }>('/api/translate', authenticated.token, { html, to: target });
     if (!isCurrent(item)) throw new Error('邮件已切换，已取消应用译文。');
     if (typeof result.html !== 'string' || !result.html || result.html.length > 1000000) throw new Error('译文无效或超过显示限制。');
-    await new Promise<void>((resolve, reject) => displayed.setAsync(result.html, { coercionType: Office.CoercionType.Html }, response => {
-      if (response.status === Office.AsyncResultStatus.Succeeded) resolve();
-      else reject(new Error('译文显示失败，原始邮件未修改。'));
-    }));
+    notify(item, '正在显示译文…');
+    await officeCall<void>(callback => displayed.setAsync(result.html, { coercionType: Office.CoercionType.Html }, callback),
+      '译文显示失败，原始邮件未修改。',
+      '由世纪互联运营的Outlook on the Web目前还不支持该接口，请使用Outlook客户端体验该功能。');
     notifyTranslationComplete(item);
+  } catch (error) {
+    notify(item, error instanceof Error ? error.message : '翻译失败，请重试。', true);
+    throw error;
   } finally { running.delete(key); }
 }

@@ -18,6 +18,14 @@ test('authenticates, translates the entire HTML and replaces only the displayed 
   expect(api).toHaveBeenCalledWith('/api/translate', 'token', { html: '<p>Hello</p>', to: 'zh-Hans' });
   expect(setAsync).toHaveBeenCalledWith('<p>你好</p>', { coercionType: 'html' }, expect.any(Function));
 });
+
+test('reports each translation stage so a stalled host call can be located', async () => {
+  const { item } = setup();
+  await translateCurrentMessage('zh-Hans');
+  expect(item.notificationMessages.replaceAsync.mock.calls.map(call => (call[1] as any).message)).toEqual([
+    '正在登录…', '正在读取邮件正文…', '正在翻译整封邮件…', '正在显示译文…', '翻译完成。',
+  ]);
+});
 test('keeps the original on translation or SSO failure', async () => {
   const { setAsync } = setup();
   (api as jest.Mock).mockRejectedValue(new Error('network'));
@@ -86,4 +94,47 @@ test('reports a display failure when restoring the original', async () => {
   const { setAsync } = setup();
   setAsync.mockImplementation((_html, _options, cb) => cb({ status: 'failed' }));
   await expect(mail.showOriginalMessage()).rejects.toThrow('原文显示失败');
+});
+
+test('times out an unresponsive display API, completes the command, and allows retry', async () => {
+  jest.useFakeTimers();
+  try {
+    const { item, setAsync } = setup();
+    setAsync.mockImplementation(() => {});
+    const { completeCommand } = await import('./command-logic');
+    const event = { completed: jest.fn() };
+    const result = completeCommand(event, () => translateCurrentMessage('zh-Hans'));
+    const assertion = expect(result).rejects.toThrow('由世纪互联运营的Outlook on the Web目前还不支持该接口，请使用Outlook客户端体验该功能。');
+    await jest.advanceTimersByTimeAsync(15000);
+    await assertion;
+    expect(event.completed).toHaveBeenCalledTimes(1);
+    expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith('mail-translation-status',
+      expect.objectContaining({ type: 'error', message: '由世纪互联运营的Outlook on the Web目前还不支持该接口，请使用Outlook客户端体验该功能。' }), expect.any(Function));
+    setAsync.mockImplementation((_html, _options, cb) => cb({ status: 'succeeded' }));
+    await expect(translateCurrentMessage('zh-Hans')).resolves.toBeUndefined();
+  } finally { jest.useRealTimers(); }
+});
+
+test('times out when Outlook never returns the original body', async () => {
+  jest.useFakeTimers();
+  try {
+    const { item, setAsync } = setup();
+    item.body.getAsync.mockImplementation(() => {});
+    const assertion = expect(translateCurrentMessage('zh-Hans')).rejects.toThrow('读取邮件正文超时');
+    await jest.advanceTimersByTimeAsync(15000);
+    await assertion;
+    expect(api).not.toHaveBeenCalled();
+    expect(setAsync).not.toHaveBeenCalled();
+  } finally { jest.useRealTimers(); }
+});
+
+test('times out restoring the original instead of locking the pane indefinitely', async () => {
+  jest.useFakeTimers();
+  try {
+    const { setAsync } = setup();
+    setAsync.mockImplementation(() => {});
+    const assertion = expect(mail.showOriginalMessage()).rejects.toThrow('显示原文超时');
+    await jest.advanceTimersByTimeAsync(15000);
+    await assertion;
+  } finally { jest.useRealTimers(); }
 });

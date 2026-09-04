@@ -58,6 +58,14 @@ Redirect URI 和 Application ID URI 不同。当前实现使用 Office SSO → �
 
 `DisplayedBody.setAsync` 仍使用 Office.js Preview，支持范围以客户端实际能力为准；保留本项目已经测试可用的 beta CDN。
 
+### OWA 正文显示未响应
+
+2026-09-05 在世纪互联 OWA (`partner.outlook.cn`) 实测：SSO、账户查询、正文读取及翻译请求均成功，但 `display.body.setAsync` 未替换正文，也未返回回调。仅检查该函数是否存在，不能证明宿主已实现该预览接口。此结果不代表所有 OWA 环境均不支持。
+
+翻译状态现在分别显示登录、读取正文、翻译、显示译文。正文读取和显示调用在 15 秒无回调时明确报错并解除等待，命令也会完成；显示超时不表示翻译服务失败。无法取消已经提交给 Office 的显示调用，因此超时后请重新打开邮件再重试，避免旧调用延迟完成。原始邮件不会被修改。目前该 OWA 环境的原位显示仍待解决，可先使用已验证可用的 Outlook 客户端。
+
+接口说明：[DisplayedBody.setAsync（预览）](https://learn.microsoft.com/en-us/javascript/api/outlook/office.displayedbody?view=outlook-js-preview)。
+
 ## 安装新清单
 
 重新旁加载项目根目录 `manifest.xml`（版本 1.1.0.0）。沿用原插件 ID，因此升级已有安装即可；若仍显示旧按钮，移除旧测试插件后加载新清单。新清单包含 v1.1 WebApplicationInfo 和两个菜单项。

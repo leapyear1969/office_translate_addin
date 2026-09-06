@@ -66,6 +66,8 @@ Redirect URI 和 Application ID URI 不同。当前实现使用 Office SSO → �
 
 接口说明：[DisplayedBody.setAsync（预览）](https://learn.microsoft.com/en-us/javascript/api/outlook/office.displayedbody?view=outlook-js-preview)。
 
+后续最小复现发现，绕过插件的 15 秒超时后，Office.js 约 76 秒返回 `RequestTimeout`（5018），而非永久不回调。完整环境、对照实验、SDK 边界返回码和一手资料见 [OWA 原位显示诊断](docs/owa-display-diagnosis.md)。
+
 ## 安装新清单
 
 重新旁加载项目根目录 `manifest.xml`（版本 1.1.0.0）。沿用原插件 ID，因此升级已有安装即可；若仍显示旧按钮，移除旧测试插件后加载新清单。新清单包含 v1.1 WebApplicationInfo 和两个菜单项。

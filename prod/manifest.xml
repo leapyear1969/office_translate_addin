@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="MailApp">
-  <Id>8cf39d33-31e8-4ed8-8ac0-f3e51d602286</Id><Version>1.1.0.0</Version><ProviderName>邮件翻译</ProviderName><DefaultLocale>zh-CN</DefaultLocale>
-  <DisplayName DefaultValue="邮件翻译"/><Description DefaultValue="通过 Azure 翻译整封邮件，保留正文排版，支持 Office SSO 和翻译选项。"/>
-  <IconUrl DefaultValue="https://www.majun.fun:30260/assets/icon-32.png"/><HighResolutionIconUrl DefaultValue="https://www.majun.fun:30260/assets/icon-80.png"/><SupportUrl DefaultValue="https://www.majun.fun:30260/taskpane.html"/>
+  <Id>8cf39d33-31e8-4ed8-8ac0-f3e51d602286</Id><Version>1.1.0.8</Version><ProviderName>Outlook邮件翻译</ProviderName><DefaultLocale>zh-CN</DefaultLocale>
+  <DisplayName DefaultValue="Outlook邮件翻译"/><Description DefaultValue="通过 Azure翻译服务翻译整封邮件，保留正文排版，支持 Office SSO 和翻译选项。"/>
+  <IconUrl DefaultValue="https://www.majun.fun:30260/assets/icon-80.png"/><HighResolutionIconUrl DefaultValue="https://www.majun.fun:30260/assets/icon-80.png"/><SupportUrl DefaultValue="https://www.majun.fun:30260/taskpane.html"/>
   <AppDomains><AppDomain>https://www.majun.fun:30260</AppDomain></AppDomains><Hosts><Host Name="Mailbox"/></Hosts>
   <Requirements><Sets><Set Name="Mailbox" MinVersion="1.5"/></Sets></Requirements>
   <FormSettings><Form xsi:type="ItemRead"><DesktopSettings><SourceLocation DefaultValue="https://www.majun.fun:30260/taskpane.html"/><RequestedHeight>450</RequestedHeight></DesktopSettings></Form></FormSettings>
@@ -31,7 +31,7 @@
     <Resources>
       <bt:Images><bt:Image id="Icon.16" DefaultValue="https://www.majun.fun:30260/assets/icon-16.png"/><bt:Image id="Icon.32" DefaultValue="https://www.majun.fun:30260/assets/icon-32.png"/><bt:Image id="Icon.64" DefaultValue="https://www.majun.fun:30260/assets/icon-64.png"/><bt:Image id="Icon.80" DefaultValue="https://www.majun.fun:30260/assets/icon-80.png"/></bt:Images>
       <bt:Urls><bt:Url id="Commands.Url" DefaultValue="https://www.majun.fun:30260/commands.html"/><bt:Url id="Taskpane.Url" DefaultValue="https://www.majun.fun:30260/taskpane.html"/></bt:Urls>
-      <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="邮件翻译"/><bt:String id="Menu.Label" DefaultValue="翻译"/><bt:String id="Translate.Label" DefaultValue="翻译邮件"/><bt:String id="Options.Label" DefaultValue="翻译选项"/></bt:ShortStrings>
+      <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="Outlook邮件翻译"/><bt:String id="Menu.Label" DefaultValue="Outlook邮件翻译"/><bt:String id="Translate.Label" DefaultValue="翻译邮件"/><bt:String id="Options.Label" DefaultValue="翻译选项"/></bt:ShortStrings>
       <bt:LongStrings><bt:String id="Menu.Description" DefaultValue="翻译邮件并管理翻译选项。"/><bt:String id="Translate.Description" DefaultValue="翻译整封邮件并在原文位置显示译文。"/><bt:String id="Options.Description" DefaultValue="设置目标语言、自动翻译偏好和不翻译的语言。"/></bt:LongStrings>
     </Resources>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
@@ -58,7 +58,7 @@
     <Resources>
       <bt:Images><bt:Image id="Icon.16" DefaultValue="https://www.majun.fun:30260/assets/icon-16.png"/><bt:Image id="Icon.32" DefaultValue="https://www.majun.fun:30260/assets/icon-32.png"/><bt:Image id="Icon.64" DefaultValue="https://www.majun.fun:30260/assets/icon-64.png"/><bt:Image id="Icon.80" DefaultValue="https://www.majun.fun:30260/assets/icon-80.png"/></bt:Images>
       <bt:Urls><bt:Url id="Commands.Url" DefaultValue="https://www.majun.fun:30260/commands.html"/><bt:Url id="Taskpane.Url" DefaultValue="https://www.majun.fun:30260/taskpane.html"/></bt:Urls>
-      <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="邮件翻译"/><bt:String id="Menu.Label" DefaultValue="翻译"/><bt:String id="Translate.Label" DefaultValue="翻译邮件"/><bt:String id="Options.Label" DefaultValue="翻译选项"/></bt:ShortStrings>
+      <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="Outlook邮件翻译"/><bt:String id="Menu.Label" DefaultValue="Outlook邮件翻译"/><bt:String id="Translate.Label" DefaultValue="翻译邮件"/><bt:String id="Options.Label" DefaultValue="翻译选项"/></bt:ShortStrings>
       <bt:LongStrings><bt:String id="Menu.Description" DefaultValue="翻译邮件并管理翻译选项。"/><bt:String id="Translate.Description" DefaultValue="翻译整封邮件并在原文位置显示译文。"/><bt:String id="Options.Description" DefaultValue="设置目标语言、自动翻译偏好和不翻译的语言。"/></bt:LongStrings>
     </Resources>
       <WebApplicationInfo><Id>59a13c0d-6f19-4c66-b8fd-2fa80d0186bc</Id><Resource>api://www.majun.fun:30260/59a13c0d-6f19-4c66-b8fd-2fa80d0186bc</Resource><Scopes><Scope>openid</Scope><Scope>profile</Scope><Scope>User.Read</Scope></Scopes></WebApplicationInfo>

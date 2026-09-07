@@ -1,4 +1,5 @@
 import { api, authenticate, Session } from '../shared/api';
+import { requestConsent } from '../shared/consent';
 import { bodyHtml, currentItem, isCurrent, showOriginalMessage, translateCurrentMessage } from '../shared/mail';
 import { LANGUAGES, loadSettings, saveSettings, Settings, shouldOfferTranslation } from '../shared/settings';
 
@@ -16,6 +17,7 @@ let translating = false;
 let restoring = false;
 let preserveOriginal = false;
 let dirty = false;
+let authorizing = false;
 function updateMessageActions() {
   element('translate-message').textContent = `将邮件翻译为：${LANGUAGES[settings.target]}`;
   const disabled = translating || restoring || !currentItem();
@@ -119,16 +121,35 @@ function readInitializationContext(): Promise<void> {
   });
 }
 async function signIn(interactive: boolean) {
+  if (authorizing) return;
   const attempt = ++loginEpoch;
   element<HTMLButtonElement>('signin').disabled = true;
   element('account-name').textContent = '正在读取登录账户…';
+  element('browser-consent').hidden = true;
   try {
-    const authenticated = await authenticate(interactive);
+    let authenticated: Session;
+    try { authenticated = await authenticate(interactive); }
+    catch (error) {
+      const failure = error as { code?: string; token?: string };
+      if (!interactive || failure.code !== 'consent_required' || !failure.token) throw error;
+      authorizing = true;
+      const url = await requestConsent(failure.token);
+      element<HTMLAnchorElement>('browser-consent-link').href = url;
+      element('browser-consent').hidden = false;
+      session = undefined;
+      element('account-name').textContent = '等待浏览器授权';
+      element('account-email').textContent = '';
+      element('signin').hidden = false;
+      element('signin').textContent = '登录并授权';
+      status('请在浏览器中使用当前 Outlook 账户完成授权，然后关闭此窗口并重新打开插件。');
+      return;
+    }
     if (attempt !== loginEpoch) return;
     session = authenticated;
     element('account-name').textContent = session.user.displayName || '已登录';
     element('account-email').textContent = session.user.mail;
     element('signin').hidden = false;
+    element('signin').textContent = '重新登录';
     if (!preserveOriginal) { status(''); await inspectMessage(); }
   } catch (error) {
     if (attempt !== loginEpoch) return;
@@ -136,8 +157,9 @@ async function signIn(interactive: boolean) {
     element('account-name').textContent = '尚未完成登录';
     element('account-email').textContent = '';
     element('signin').hidden = false;
+    element('signin').textContent = '登录并授权';
     if (!preserveOriginal) status((error as Error).message, true);
-  } finally { if (attempt === loginEpoch) element<HTMLButtonElement>('signin').disabled = false; }
+  } finally { authorizing = false; if (attempt === loginEpoch) element<HTMLButtonElement>('signin').disabled = false; }
 }
 
 fillLanguages(target); fillLanguages(picker); target.value = 'zh-Hans';

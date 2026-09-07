@@ -35,6 +35,15 @@ test('keeps the original on translation or SSO failure', async () => {
   await expect(translateCurrentMessage('en')).rejects.toThrow('SSO');
   expect(setAsync).not.toHaveBeenCalled();
 });
+
+test('missing consent offers an action opening translation options without changing the message', async () => {
+  const { item, setAsync } = setup();
+  (authenticate as jest.Mock).mockRejectedValue(Object.assign(new Error('consent'), { code: 'consent_required' }));
+  await expect(translateCurrentMessage('en')).rejects.toThrow('consent');
+  expect(setAsync).not.toHaveBeenCalled();
+  expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith('mail-translation-status',
+    expect.objectContaining({ actions: [expect.objectContaining({ actionText: '登录并授权', commandId: 'Translation.Options' })] }), expect.any(Function));
+});
 test('never replaces another message after the user switches during translation', async () => {
   const { setAsync } = setup();
   (api as jest.Mock).mockImplementation(async () => {

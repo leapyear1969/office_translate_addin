@@ -18,7 +18,8 @@ test('places a decorative translation icon before the options title', () => {
 test('shows compact account details and sign-in before the message actions', async () => {
   await setup();
   const account = document.querySelector('.account')!;
-  expect(account.nextElementSibling?.className).toBe('message-actions');
+  expect(account.nextElementSibling?.id).toBe('browser-consent');
+  expect(account.nextElementSibling?.nextElementSibling?.className).toBe('message-actions');
   expect(account.querySelector('.account-details #account-name')?.textContent).toBe('User');
   expect(account.querySelector('.account-details #account-email')?.textContent).toBe('u@example.com');
   expect(account.querySelector('.account-label')).toBeNull();
@@ -32,6 +33,8 @@ async function setup(context?: unknown, mode = 'never', language = 'zh-Hans') {
   const api = jest.fn(async (path: string) => path === '/api/detect' ? { language: 'en', score: 1 } : { html: '<p>译文</p>' });
   const authenticate = jest.fn(async () => ({ token: 'token', user: { id: 'u', displayName: 'User', mail: 'u@example.com' } }));
   jest.doMock('../shared/api', () => ({ api, authenticate }));
+  const requestConsent = jest.fn(async () => 'https://addin.example/consent.html#state=test');
+  jest.doMock('../shared/consent', () => ({ requestConsent }));
   const handlers: Record<string, Function> = {};
   const itemHandlers: Record<string, Function> = {};
   const setAsync = jest.fn((_html, _options, cb) => cb({ status: 'succeeded' }));
@@ -58,8 +61,36 @@ async function setup(context?: unknown, mode = 'never', language = 'zh-Hans') {
   require('./taskpane');
   ready({ host: 'Outlook' });
   await settle();
-  return { api, authenticate, item, setAsync, itemHandlers, handlers };
+  return { api, authenticate, requestConsent, item, setAsync, itemHandlers, handlers };
 }
+
+test('user consent opens a browser and asks to reopen the add-in without premature sign-in retry', async () => {
+  const { authenticate, requestConsent } = await setup();
+  authenticate.mockRejectedValueOnce(Object.assign(new Error('请授权'), { code: 'consent_required', token: 'sso' }));
+  button('signin').click();
+  await settle();
+  expect(requestConsent).toHaveBeenCalledWith('sso');
+  expect(document.getElementById('account-name')!.textContent).toBe('等待浏览器授权');
+  expect(document.getElementById('browser-consent')!.hidden).toBe(false);
+  expect((document.getElementById('browser-consent-link') as HTMLAnchorElement).href).toBe('https://addin.example/consent.html#state=test');
+  expect(authenticate).toHaveBeenCalledTimes(2);
+  expect(button('signin').disabled).toBe(false);
+});
+
+test('silent missing consent offers a button without opening a dialog and cancellation allows retry', async () => {
+  const { authenticate, requestConsent, handlers } = await setup();
+  const error = Object.assign(new Error('请授权'), { code: 'consent_required', token: 'sso' });
+  authenticate.mockRejectedValue(error);
+  handlers.itemChanged();
+  await settle();
+  expect(requestConsent).not.toHaveBeenCalled();
+  expect(button('signin').textContent).toBe('登录并授权');
+  requestConsent.mockRejectedValueOnce(new Error('已取消授权'));
+  button('signin').click();
+  await settle();
+  expect(button('signin').disabled).toBe(false);
+  expect(document.getElementById('status')!.textContent).toBe('已取消授权');
+});
 
 test('shows both actions with the saved target language and translates even in never mode', async () => {
   const { api, setAsync } = await setup(undefined, 'never', 'ja');

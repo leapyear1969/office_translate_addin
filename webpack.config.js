@@ -13,6 +13,7 @@ module.exports = async (_env, argv) => {
       commands: "./src/commands/commands.ts",
       taskpane: "./src/taskpane/taskpane.ts",
       original: "./src/taskpane/original.ts",
+      consent: "./src/taskpane/consent.ts",
     },
     devtool: isDevelopment ? "source-map" : false,
     resolve: {
@@ -39,6 +40,7 @@ module.exports = async (_env, argv) => {
       }),
       new HtmlWebpackPlugin({ filename: "taskpane.html", template: "./src/taskpane/taskpane.html", chunks: ["taskpane"], inject: "body" }),
       new HtmlWebpackPlugin({ filename: "original.html", template: "./src/taskpane/original.html", chunks: ["original"], inject: "body" }),
+      new HtmlWebpackPlugin({ filename: "consent.html", template: "./src/taskpane/consent.html", chunks: ["consent"], inject: "body" }),
     ],
     output: {
       clean: true,

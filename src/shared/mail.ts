@@ -32,6 +32,17 @@ export function notify(item: Office.MessageRead, message: string, error = false)
     : { type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage, message: message.slice(0, 150), icon: 'Icon.16', persistent: false };
   item.notificationMessages.replaceAsync('mail-translation-status', notification, () => {});
 }
+export function notifyConsentRequired(item: Office.MessageRead): void {
+  if (!isCurrent(item)) return;
+  item.notificationMessages.replaceAsync('mail-translation-status', {
+    type: Office.MailboxEnums.ItemNotificationMessageType.InsightMessage,
+    message: '首次使用需要授权，请打开翻译选项完成登录。', icon: 'Icon.16',
+    actions: [{ actionText: '登录并授权', actionType: 'showTaskPane', commandId: 'Translation.Options',
+      contextData: JSON.stringify({ action: 'consent' }) }],
+  }, result => {
+    if (result.status !== Office.AsyncResultStatus.Succeeded) notify(item, '首次使用需要授权，请打开“翻译选项”，点击“登录并授权”。');
+  });
+}
 const running = new Set<string | Office.MessageRead>();
 
 export async function showOriginalMessage(): Promise<void> {
@@ -89,7 +100,8 @@ export async function translateCurrentMessage(target: string, session?: Session,
       '由世纪互联运营的Outlook on the Web目前还不支持该接口，请使用Outlook客户端体验该功能。');
     notifyTranslationComplete(item);
   } catch (error) {
-    notify(item, error instanceof Error ? error.message : '翻译失败，请重试。', true);
+    if ((error as { code?: string }).code === 'consent_required') notifyConsentRequired(item);
+    else notify(item, error instanceof Error ? error.message : '翻译失败，请重试。', true);
     throw error;
   } finally { running.delete(key); }
 }

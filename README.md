@@ -26,11 +26,37 @@ npm start
 - Microsoft Graph 委托权限 `User.Read`，完成所需的管理员同意。
 - 在 `.env` 的 `CLIENT_SECRET` 填入该新应用客户端密钥的**值**，不是密钥 ID，然后重启服务。
 
-Redirect URI 和 Application ID URI 不同。当前实现使用 Office SSO → 后端 JWT 签名/发行者/受众/租户/权限验证 → MSAL OBO → 中国区 Graph `/me`，不使用浏览器授权码回调，也没有跳过认证的开发接口。前端每次手动翻译会先获取并验证登录用户信息。SSO 不可用时会明确报错，不冒用邮箱地址作为认证结果。
+Redirect URI 和 Application ID URI 不同。当前实现使用 Office SSO → 后端 JWT 签名/发行者/受众/租户/权限验证 → MSAL OBO → 中国区 Graph `/me`。首次缺少 Graph consent 时通过外部浏览器及服务端授权码 + PKCE 流程让用户授权，用户重新打开插件后验证 SSO 和 Graph 访问。前端每次手动翻译会先获取并验证登录用户信息。SSO 不可用时会明确报错，不冒用邮箱地址作为认证结果。
 
 `AUTHORITY` 默认 `https://login.partner.microsoftonline.cn`，`GRAPH_BASE` 默认 `https://microsoftgraph.chinacloudapi.cn`，与参考项目一致。
 
 参考：[Office SSO 配置](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/use-sso-to-get-office-signed-in-user-token)。
+
+## 中国版跨租户登录与授权
+
+应用注册应支持中国云中的任意组织目录。服务器按登录令牌的 `tid` 在配置的中国云身份地址发现租户元数据，验证签名、发行者、受众、租户及 `access_as_user` 权限后，使用同一租户执行 Graph OBO。`TENANT_ID` 保留为应用注册所属租户的信息，不再是登录租户白名单，也无需改为 `common`。当前支持同一云内所有能取得本应用有效令牌的组织租户。
+
+客户用户需要有效的 consent；开发者租户的管理员同意不覆盖客户租户。项目使用 Microsoft Graph `User.Read` 委托权限读取用户信息，该权限本身不强制管理员同意：客户租户策略允许时，普通用户可以为自己同意；管理员也可代表整个租户同意。部署 Outlook 清单不能作为 Graph 授权已完成的证明。Office 客户端对 `access_as_user` 的预授权仍须在应用注册中配置。
+
+首次缺少 Graph consent 时，邮件提示栏显示“登录并授权”操作，点击打开“翻译选项”；配置页中的“登录并授权”按钮使用 openBrowserWindow 打开默认浏览器中的微软中国版授权页面；不支持该接口时显示可点击或复制的链接，网页版打开当前浏览器的新标签页，无法强制切换系统默认浏览器。用户应使用当前 Outlook 账户并同意 `User.Read`。完成页提示用户关闭窗口并重新打开插件；插件重新打开后验证登录并按现有设置检查邮件。静默登录不会自动弹窗，取消后可重新点击。旧版 Outlook 功能命令没有通用的直接打开侧栏接口，因此需要用户点击提示栏操作；不支持操作提示的客户端会显示手动打开“翻译选项”的说明。
+
+部署前，在中国版 Entra 应用注册 → 身份验证 → Web 中添加 `${APP_BASE_URL}/auth/consent/callback`（将占位符替换为实际值）。当前生产清单对应 `https://www.majun.fun:30260/auth/consent/callback`，本地开发是 `https://localhost:3000/auth/consent/callback`。这是 **Web** 回调，不是 SPA；不要启用隐式授权。保留现有 Application ID URI、Office 预授权和服务器 CLIENT_SECRET。
+
+授权会话保存在服务端内存中，10 分钟过期且只能使用一次，使用 state、nonce、PKCE 并检查授权用户的 tid/oid 与已验证的 Outlook SSO 身份相同。浏览器不向插件传递令牌或完成消息；插件不会将打开浏览器视为授权成功。多实例部署需要会话粘滞或共享会话存储；服务重启后用户需重新发起授权。反向代理应将 `/auth/consent/*` 转发至 Node 服务，避免记录授权回调查询参数。仅使用普通用户同意；租户策略禁止用户授权时，仍需管理员处理，插件不会绕过租户策略。
+
+如选择统一授权，将下面地址中的 `CUSTOMER_TENANT_ID` 替换为客户租户 ID，让客户管理员登录并核对权限后同意：
+
+```text
+https://login.partner.microsoftonline.cn/CUSTOMER_TENANT_ID/adminconsent?client_id=59a13c0d-6f19-4c66-b8fd-2fa80d0186bc
+```
+
+管理员可在客户租户的“企业应用程序”中按上述应用 ID 查找应用，并在“权限”中确认租户范围的授权。管理员统一授权是可选方式，不是 `User.Read` 的强制要求。上述 `/auth/consent/callback` 用于插件发起的用户授权码流程，不用于独立管理员授权链接。
+
+升级时部署新的 `server` 代码及重新构建的 `dist`，然后重启 Node 服务。仅重新部署清单不会更新后端。此次修复无需更换应用 ID、客户租户 ID 或客户端密钥。
+
+错误码 `13013` 是 Office SSO 请求限流，不是缺少 consent 的直接证据。遇到此错误先停止重复点击，稍后重新打开加载项；仍失败时检查最初的 Office 错误和 Entra 登录日志。用户授权入口针对已取得 SSO 令牌但 Graph 返回 `consent_required` 的情况；它不能修复 Office 无法签发 SSO 令牌的问题。
+
+参考：[中国版租户管理员授权](https://docs.azure.cn/zh-cn/entra/identity/enterprise-apps/grant-admin-consent?pivots=portal)、[Office SSO 错误码](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/troubleshoot-sso-in-office-add-ins)。
 
 ## 翻译配置与行为
 

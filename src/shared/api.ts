@@ -11,7 +11,7 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
       body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || `请求失败（${response.status}）。`);
+    if (!response.ok) throw Object.assign(new Error(result.error || `请求失败（${response.status}）。`), { code: result.code });
     return result as T;
   } catch (error) {
     if (controller.signal.aborted) throw new Error('请求超时，原文保持不变，请重试。');
@@ -34,5 +34,11 @@ export async function authenticate(interactive = true): Promise<Session> {
     const value = error as { code?: number; message?: string };
     throw new Error(value.code ? `SSO 登录失败（${value.code}），请检查应用预授权或在翻译选项中重试。` : value.message || 'SSO 登录失败。');
   } finally { clearTimeout(timer); }
-  return { token, user: await api<UserProfile>('/api/me', token) };
+  try { return { token, user: await api<UserProfile>('/api/me', token) }; }
+  catch (error) {
+    // Consent starts with the already verified Office identity, so retain the
+    // assertion in memory for this error only; never put it in a URL or storage.
+    if ((error as { code?: string }).code === 'consent_required') Object.assign(error as Error, { token });
+    throw error;
+  }
 }

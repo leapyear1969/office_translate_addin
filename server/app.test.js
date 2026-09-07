@@ -26,6 +26,15 @@ test('translates authenticated requests and returns the Graph profile', () => se
   expect(me.status).toBe(200);
   expect((await me.json()).displayName).toBe('Test');
 }));
+
+test('returns a structured consent code and protects the consent start endpoint', () => setup(async ({ request, profile }) => {
+  profile.mockRejectedValue(Object.assign(new Error('请授权'), { status: 403, code: 'consent_required' }));
+  const me = await request('/api/me', { token: 'valid' });
+  expect(me.status).toBe(403);
+  expect(await me.json()).toEqual({ error: '请授权', code: 'consent_required' });
+  const start = await request('/api/consent/start', { body: {} });
+  expect(start.status).toBe(401);
+}));
 test('rejects invalid input and foreign origins before translation', () => setup(async ({ request, translate }) => {
   const invalid = await request('/api/translate', { token: 'valid', body: { html: '<p>x</p>', to: '../bad' } });
   expect(invalid.status).toBe(400);

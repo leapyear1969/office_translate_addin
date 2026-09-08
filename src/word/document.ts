@@ -62,13 +62,11 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         }
         const control = range.insertContentControl();
         control.tag = record.tag;
-        control.title = '翻译内容（可恢复原文）';
+        control.title = '翻译内容（原文已备份）';
         control.insertHtml(result.html, Word.InsertLocation.replace);
         const translated = control.getRange('Content');
         translated.load('text');
-        const translatedHtml = translated.getHtml();
         await context.sync();
-        record.translatedHtml = translatedHtml.value;
         record.translatedText = translated.text;
         try { await saveRangeBackups([...backups, record]); }
         catch {
@@ -99,18 +97,18 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
         const controls = context.document.contentControls.getByTag(record.tag);
         controls.load('items');
         await context.sync();
-        if (controls.items.length !== 1 || record.translatedHtml === undefined || record.translatedText === undefined) {
+        if (controls.items.length !== 1 || record.translatedText === undefined) {
           if (controls.items.length) result.skipped++;
           continue;
         }
         const control = controls.items[0];
         const range = control.getRange('Content');
         range.load('text');
-        const html = range.getHtml();
         await context.sync();
-        // Fail closed on formatting/serialization differences too. A false
-        // conflict is preferable to silently overwriting a user's edits.
-        if (range.text !== record.translatedText || html.value !== record.translatedHtml) {
+        // Word HTML exports aren't stable across saves/reopens. Compare exact
+        // text, including whitespace. Restoration also restores the original
+        // formatting within this control, as stated in the confirmation UI.
+        if (range.text !== record.translatedText) {
           result.skipped++;
           continue;
         }

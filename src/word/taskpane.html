@@ -33,9 +33,9 @@
       <button id="translate-body" type="button" disabled>翻译正文全文</button>
       <button id="restore-original" type="button" disabled>恢复原文</button>
     </section>
-    <p class="hint">按翻译范围保存原文，备份随文档保存并随文件共享。恢复只处理未被修改的译文，保留其他编辑；修改过内容或格式的译文会跳过。重叠范围需先恢复再翻译。</p>
+    <p class="hint">按翻译范围保存原文，备份随文档保存并随文件共享。恢复该范围的原文及原格式，范围外的编辑会保留；译文文字已修改时跳过。重叠范围需先恢复再翻译。</p>
     <section id="restore-prompt" hidden aria-label="确认恢复原文">
-      <p>恢复所有可安全恢复的翻译内容？其他位置的编辑会保留；修改过的译文会跳过。</p>
+      <p>恢复所有文字未修改的译文及其原格式？翻译范围内后改的格式、图片等也会还原；范围外的编辑会保留，文字已修改的译文会跳过。</p>
       <button id="confirm-restore" type="button">确认恢复翻译内容</button>
       <button id="cancel-restore" type="button">取消</button>
     </section>

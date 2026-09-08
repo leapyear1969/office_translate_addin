@@ -124,7 +124,7 @@ element('confirm-restore').addEventListener('click', async () => {
   try {
     const result = await restoreOriginalBody();
     status(result.skipped
-      ? `已恢复 ${result.restored} 处翻译；${result.skipped} 处因内容或格式已修改、标记重复或备份未完成而跳过，已保留当前编辑。`
+      ? `已恢复 ${result.restored} 处翻译；${result.skipped} 处因文字已修改、标记重复或备份未完成而跳过，已保留当前编辑。`
       : result.restored ? `已恢复 ${result.restored} 处翻译的原文，其他编辑已保留。请保存文档。` : '没有可恢复的翻译范围，当前正文未改变。');
   } catch (error) { status((error as Error).message, true); }
   finally { translating = false; updateDocumentActions(); }

@@ -77,16 +77,37 @@ test('restores translation while preserving edits in other ranges, without authe
   expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
 });
 
-test.each(['text', 'html'])('skips edited translation %s and restores other independent translations', async field => {
+test.each(['User correction', '', '译文 '])('skips edited translation text %j and restores other independent translations', async edited => {
   const { selection, paragraph, controls } = setup();
   await translateDocument('selection', 'ja');
   await translateDocument('paragraph', 'ja');
-  selection[field] = field === 'text' ? 'User correction' : '<p><b>译文</b></p>';
+  selection.text = edited;
   const conflicted = controls[0];
   expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 1 });
   expect(conflicted.insertOoxml).not.toHaveBeenCalled();
   expect(paragraph.text).toBe('Original');
-  expect(selection[field]).toBe(field === 'text' ? 'User correction' : '<p><b>译文</b></p>');
+  expect(selection.text).toBe(edited);
+});
+
+test.each(['<p id="new-export"><span>译文</span></p>', '<p><b>译文</b></p>'])('restores original text and formatting when only HTML changes: %s', async html => {
+  const { selection, body, controls } = setup();
+  await translateDocument('selection', 'ja');
+  const control = controls[0];
+  selection.html = html;
+  body.text = 'Hello, I am Jason';
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
+  expect(control.insertOoxml).toHaveBeenCalledWith('<original/>', 'Replace');
+  expect(body.text).toBe('Hello, I am Jason');
+});
+
+test('existing backups with a stale translated HTML snapshot remain restorable', async () => {
+  const { selection, storage } = setup();
+  await translateDocument('selection', 'ja');
+  const records = rangeBackups();
+  records[0].translatedHtml = '<p id="old-export">译文</p>';
+  storage.set('wordTranslation.ranges.v2', records);
+  selection.html = '<p id="new-export">译文</p>';
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
 });
 
 test('new translation after restoration backs up the latest edited original', async () => {
@@ -158,7 +179,7 @@ test('checkpoint failure retains original and skips uncertain translation on res
     .mockImplementationOnce(cb => cb({ status: 'failed' }));
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('译文已写入');
   expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
-  expect(rangeBackups()[0].translatedHtml).toBeUndefined();
+  expect(rangeBackups()[0].translatedText).toBeUndefined();
   expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 1 });
   expect(controls[0].insertOoxml).not.toHaveBeenCalled();
 });

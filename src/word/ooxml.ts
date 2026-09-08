@@ -11,27 +11,6 @@ function parse(xml: string): XMLDocument {
   return doc;
 }
 
-/** Ignore export-only metadata and settings (which change when saving backups),
- * but detect edits to text, layout, styles, images and their relationships. */
-export function ooxmlStructure(xml: string): string {
-  function canonical(element: Element): unknown {
-    const attributes = Array.from(element.attributes)
-      .filter(attr => attr.namespaceURI !== 'http://www.w3.org/2000/xmlns/'
-        && !(attr.namespaceURI === W && attr.localName.startsWith('rsid')))
-      .map(attr => [attr.namespaceURI, attr.localName, attr.value])
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    const children = Array.from(element.childNodes).filter(node => node.nodeType === 1
-      || ((node.nodeType === 3 || node.nodeType === 4) && (node.textContent?.trim()
-        || (element.namespaceURI === W && ['t', 'instrText'].includes(element.localName)))))
-      .map(node => node.nodeType === 1 ? canonical(node as Element) : node.textContent);
-    return [element.namespaceURI, element.localName, attributes, children];
-  }
-  const parts = Array.from(parse(xml).getElementsByTagNameNS(PKG, 'part'))
-    .filter(part => /^\/word\/(document\.xml|styles\.xml|numbering\.xml|fontTable\.xml|media\/|theme\/|_rels\/document\.xml\.rels)/.test(part.getAttributeNS(PKG, 'name') || ''))
-    .sort((a, b) => (a.getAttributeNS(PKG, 'name') || '').localeCompare(b.getAttributeNS(PKG, 'name') || ''));
-  return JSON.stringify(parts.map(canonical));
-}
-
 /** Keep the complete local package, including image binaries and relationships.
  * Only small, generated HTML paragraphs are sent to the translation service. */
 export function prepareOoxml(xml: string) {
@@ -40,7 +19,8 @@ export function prepareOoxml(xml: string) {
     .find(part => part.getAttributeNS(PKG, 'name') === '/word/document.xml');
   const body = main?.getElementsByTagNameNS(W, 'body')[0];
   if (!body) throw new Error('Word 未返回完整的正文结构，已取消全文翻译。');
-  const segments: { nodes: Element[]; html: string }[] = [];
+  const segments: { nodes: Element[]; html: string; index: number }[] = [];
+  const sourceParagraphs: string[] = [];
   const fieldParagraphs = new Set<Element>();
   let fieldDepth = 0;
   // Complex fields can span multiple paragraphs; their result paragraphs may
@@ -65,6 +45,8 @@ export function prepareOoxml(xml: string) {
       while (parent && !(parent.namespaceURI === W && parent.localName === 'p')) parent = parent.parentElement;
       return parent === paragraph;
     });
+    const index = sourceParagraphs.length;
+    sourceParagraphs.push(nodes.map(node => node.textContent || '').join(''));
     if (!nodes.some(node => node.textContent?.trim())) continue;
     let unsafe = fieldParagraphs.has(paragraph);
     for (let parent = paragraph.parentElement; parent && parent !== body; parent = parent.parentElement) {
@@ -82,12 +64,14 @@ export function prepareOoxml(xml: string) {
     if (runs.some(run => Array.from(run.children).some(child => child.namespaceURI !== W || !['rPr', 't'].includes(child.localName)))) unsafe = true;
     const html = '<p>' + nodes.map((node, i) => `<span id="r${i}">${escapeHtml(node.textContent || '')}</span>`).join('') + '</p>';
     if (unsafe || html.length > 40000) { skipped++; continue; }
-    segments.push({ nodes, html });
+    segments.push({ nodes, html, index });
   }
   if (!segments.length) throw new Error(`没有可安全翻译的正文段落${skipped ? `，${skipped} 个复杂段落已保留原文` : ''}。`);
   if (segments.reduce((total, segment) => total + segment.html.length, 0) > 1000000) throw new Error('文档文字过长，请分次翻译。');
   return {
     paragraphs: segments.map(segment => segment.html),
+    sourceText: JSON.stringify(sourceParagraphs),
+    mapping: JSON.stringify(segments.map(segment => [segment.index, segment.nodes.map(node => node.textContent || '')])),
     apply(translations: unknown) {
       if (!Array.isArray(translations) || translations.length !== segments.length
         || translations.some(value => typeof value !== 'string')
@@ -119,4 +103,17 @@ export function prepareOoxml(xml: string) {
       return { ooxml, skippedParagraphs: skipped };
     },
   };
+}
+
+/** Exports aren't revision tokens. Reapply validated translations to the latest
+ * package instead of comparing volatile IDs or inserting an older layout. */
+export function rebaseOoxml(source: ReturnType<typeof prepareOoxml>, currentXml: string, translations: unknown) {
+  const current = prepareOoxml(currentXml);
+  if (current.sourceText !== source.sourceText) {
+    throw new Error('翻译期间正文文字已更改，已取消替换，请重试。');
+  }
+  if (current.mapping !== source.mapping) {
+    throw new Error('翻译期间段落的文字分段或可翻译范围发生变化，无法安全对应译文，已取消替换，请重试。');
+  }
+  return current.apply(translations);
 }

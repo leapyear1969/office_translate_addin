@@ -1,6 +1,6 @@
 import { api, authenticate } from '../shared/api';
 import { hasLegacyBackup, rangeBackups, saveRangeBackups, TAG_PREFIX, RangeBackup } from './backup';
-import { prepareOoxml, ooxmlStructure } from './ooxml';
+import { prepareOoxml, rebaseOoxml } from './ooxml';
 
 export type Scope = 'selection' | 'paragraph' | 'body';
 let busy = false;
@@ -70,13 +70,13 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
           originalText = range.text;
         }
         const plan = bodyOoxml ? prepareOoxml(bodyOoxml.value) : undefined;
-        const originalStructure = bodyOoxml ? ooxmlStructure(bodyOoxml.value) : undefined;
         const session = await authenticate();
         let translatedHtml = '';
         let translatedBody: { ooxml: string; skippedParagraphs: number } | undefined;
+        let bodyTranslations: unknown;
         if (plan) {
           const result = await api<{ paragraphs: string[] }>('/api/translate/word', session.token, { paragraphs: plan.paragraphs, to: target });
-          translatedBody = plan.apply(result.paragraphs);
+          bodyTranslations = result.paragraphs;
         } else {
           const result = await api<{ html: string }>('/api/translate', session.token, { html: html!.value, to: target });
           if (typeof result.html !== 'string' || !result.html.trim() || result.html.length > 1000000) throw new Error('译文无效或超过显示限制。');
@@ -85,7 +85,16 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         if (!shouldContinue()) throw new Error('已取消翻译。');
         await ensureNoOverlap(context, range);
         const record: RangeBackup = { tag: TAG_PREFIX + crypto.randomUUID() };
-        if (bodyOoxml) record.originalOoxml = bodyOoxml.value;
+        if (plan) {
+          const latest = range.getOoxml();
+          range.load('text');
+          await syncStep(context, '读取全文备份');
+          if (range.text !== originalText) throw new Error('翻译期间正文文字已更改，已取消替换，请重试。');
+          // Back up the current layout, including formatting edits made while
+          // waiting for the service. No stale package is used for replacement.
+          translatedBody = rebaseOoxml(plan, latest.value, bodyTranslations);
+          record.originalOoxml = latest.value;
+        }
         else try {
           const original = range.getOoxml();
           await context.sync();
@@ -107,12 +116,11 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         const currentOoxml = bodyOoxml ? range.getOoxml() : undefined;
         await context.sync();
         if (!shouldContinue()) throw new Error('已取消翻译。');
-        // HTML exports are serialization results, not revision tokens. Word
-        // can change export metadata when settings are saved. Compare exact
-        // text for legacy scopes; full-body replacement also checks structure.
-        if (range.text !== originalText || (currentOoxml && ooxmlStructure(currentOoxml.value) !== originalStructure)) {
+        // Export packages are serialization results, not revision tokens.
+        if (range.text !== originalText) {
           throw new Error('翻译期间原文已更改，已取消替换，请重试。');
         }
+        if (plan && currentOoxml) translatedBody = rebaseOoxml(plan, currentOoxml.value, bodyTranslations);
         // Let Word import the content before wrapping it. A control created from
         // the original paragraph/selection can have incompatible boundaries.
         // Use the returned range, not the selection (which may have moved).

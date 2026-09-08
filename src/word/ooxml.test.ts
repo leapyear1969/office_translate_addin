@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { prepareOoxml, ooxmlStructure } from './ooxml';
+import { prepareOoxml, rebaseOoxml } from './ooxml';
 import { wordPackage } from './test-fixtures/package';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -73,11 +73,28 @@ test('does not translate field results spanning multiple paragraphs', () => {
   expect(plan.apply(['<p><span id="r0">正常</span></p>']).ooxml).toContain('>Field result<');
 });
 
-test('structure comparison ignores export whitespace and settings but detects layout and image edits', () => {
+test('rebases onto the latest export including metadata, relationship IDs, layout and image changes', () => {
   const original = wordPackage();
-  const metadata = original.replace('<w:p>', '<w:p w:rsidR="123">').replace(/></g, '>\n<')
-    .replace('</pkg:package>', '<pkg:part pkg:name="/word/settings.xml"><pkg:xmlData><settings/></pkg:xmlData></pkg:part></pkg:package>');
-  expect(ooxmlStructure(metadata)).toBe(ooxmlStructure(original));
-  expect(ooxmlStructure(original.replace('11906', '15000'))).not.toBe(ooxmlStructure(original));
-  expect(ooxmlStructure(original.replace('aW1hZ2U=', 'bmV3'))).not.toBe(ooxmlStructure(original));
+  const latest = original.replace('<w:p>', '<w:p xmlns:w14="urn:word14" w14:paraId="NEW" w:rsidR="123">')
+    .replace('11906', '15000').replace('aW1hZ2U=', 'bmV3')
+    .replace('</pkg:package>', '<pkg:part pkg:name="/word/_rels/document.xml.rels"><pkg:xmlData><Relationships xmlns="urn:rels"><Relationship Id="newId" Target="media/image1.png"/></Relationships></pkg:xmlData></pkg:part></pkg:package>');
+  const result = rebaseOoxml(prepareOoxml(original), latest, ['<p><span id="r0">译文</span></p>']);
+  expect(result.ooxml).toContain('15000');
+  expect(result.ooxml).toContain('bmV3');
+  expect(result.ooxml).toContain('newId');
+  expect(result.ooxml).toContain('w14:paraId="NEW"');
+  expect(result.ooxml).toContain('>译文<');
+});
+
+test('rebase rejects changed text even in skipped paragraphs', () => {
+  const original = wordPackage(paragraph('Safe') + '<w:p><w:hyperlink><w:r><w:t>Link</w:t></w:r></w:hyperlink></w:p>');
+  expect(() => rebaseOoxml(prepareOoxml(original), original.replace('Link', 'Edited'), ['<p><span id="r0">译文</span></p>']))
+    .toThrow('正文文字已更改');
+});
+
+test('rebase rejects changed run mapping instead of applying formatted text to wrong runs', () => {
+  const original = wordPackage(paragraph('Original'));
+  const latest = wordPackage('<w:p><w:r><w:t>Orig</w:t></w:r><w:r><w:t>inal</w:t></w:r></w:p>');
+  expect(() => rebaseOoxml(prepareOoxml(original), latest, ['<p><span id="r0">译文</span></p>']))
+    .toThrow('文字分段');
 });

@@ -431,13 +431,52 @@ test.each(['export', 'malformed', 'response', 'backup', 'cancel', 'edit', 'inser
   else expect(rangeBackups()[0].originalOoxml).toBe(wordPackage());
 });
 
-test('layout-only edits during full-body translation cancel replacement', async () => {
+test('layout-only edits during backup persistence are retained in the inserted full body', async () => {
   const { body, storage } = setup();
   storage.saveAsync.mockImplementationOnce(cb => {
     body.ooxml = body.ooxml.replace('11906', '15000');
     cb({ status: 'succeeded' });
   });
-  await expect(translateDocument('body', 'ja')).rejects.toThrow('原文已更改');
+  await expect(translateDocument('body', 'ja')).resolves.toEqual({ htmlBackup: false });
+  expect(body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining('15000'), 'Replace');
+  expect(body.insertHtml).not.toHaveBeenCalled();
+});
+
+test('changing export metadata on every read does not falsely report user edits', async () => {
+  const { body } = setup();
+  let exportId = 0;
+  body.getOoxml.mockImplementation(() => ({ value: wordPackage()
+    .replace('<w:p>', `<w:p xmlns:w14="urn:word14" w14:paraId="${++exportId}" w14:textId="${exportId}">`)
+    .replace('pkg:name="/word/document.xml"', `pkg:name="/word/document.xml" pkg:padding="${exportId}"`) }));
+  await expect(translateDocument('body', 'ja')).resolves.toEqual({ htmlBackup: false });
+  expect(body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining(`w14:paraId="${exportId}"`), 'Replace');
+  expect(body.insertHtml).not.toHaveBeenCalled();
+});
+
+test('backs up and translates the latest layout after the network request', async () => {
+  const { body, controls } = setup();
+  let latest = '';
+  jest.mocked(api).mockImplementationOnce(async () => {
+    latest = body.ooxml.replace('11906', '15000').replace('aW1hZ2U=', 'bmV3');
+    body.ooxml = latest;
+    return { paragraphs: ['<p><span id="r0">译文</span></p>'] } as any;
+  });
+  await translateDocument('body', 'ja');
+  expect(rangeBackups()[0].originalOoxml).toBe(latest);
+  expect(body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining('bmV3'), 'Replace');
+  const control = controls[0];
+  await restoreOriginalBody();
+  expect(control.insertOoxml).toHaveBeenCalledWith(latest, 'Replace');
+});
+
+test('text-box edits absent from Range.text still prevent full-body replacement', async () => {
+  const { body, storage } = setup();
+  body.ooxml = wordPackage('<w:p><w:r><w:pict><w:txbxContent><w:p><w:r><w:t>Box</w:t></w:r></w:p></w:txbxContent></w:pict></w:r></w:p>');
+  storage.saveAsync.mockImplementationOnce(cb => {
+    body.ooxml = body.ooxml.replace('>Box<', '>Edited<');
+    cb({ status: 'succeeded' });
+  });
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('正文文字已更改');
   expect(body.insertOoxml).not.toHaveBeenCalled();
   expect(body.insertHtml).not.toHaveBeenCalled();
 });

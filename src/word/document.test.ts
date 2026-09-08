@@ -6,6 +6,60 @@ import { rangeBackups, saveRangeBackups, TAG_PREFIX } from './backup';
 import { randomUUID } from 'crypto';
 jest.mock('../shared/api');
 
+const webPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
+  wordPackage(content).replace('<w:cols w:num="2"/>', '').replace(/<pkg:part pkg:name="\/word\/media\/image1.png">[\s\S]*?<\/pkg:part>/, '');
+function setupWeb() {
+  const ranges = setup();
+  (Office as any).PlatformType = { OfficeOnline: 'OfficeOnline' };
+  (Office.context as any).platform = 'OfficeOnline';
+  ranges.body.ooxml = webPackage();
+  const extra = { text: '', load: jest.fn(), getOoxml: () => ({ value: webPackage('<w:p/>') }) };
+  (ranges.context.document as any).sections = { load: jest.fn(), items: [{ getHeader: () => extra, getFooter: () => extra }] };
+  return { ...ranges, extra };
+}
+
+test.each(['selection', 'paragraph', 'body'] as const)('web %s checks the whole document before requesting translation', async scope => {
+  const ranges = setupWeb();
+  ranges.body.ooxml = webPackage('<w:tbl/>');
+  await expect(translateDocument(scope, 'ja')).rejects.toThrow('表格');
+  expect(api).not.toHaveBeenCalled();
+  expect(ranges.storage.saveAsync).not.toHaveBeenCalled();
+  expect(ranges[scope].insertHtml).not.toHaveBeenCalled();
+  expect(ranges[scope].insertOoxml).not.toHaveBeenCalled();
+});
+test('web allows simple documents and rejects header content', async () => {
+  const ranges = setupWeb();
+  ranges.extra.text = 'Header';
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('页眉');
+  ranges.extra.text = '';
+  await expect(translateDocument('body', 'ja')).resolves.toEqual({ htmlBackup: false });
+});
+test('web export failure does not fall back to HTML', async () => {
+  const ranges = setupWeb();
+  ranges.body.getOoxml.mockImplementation(() => { throw new Error('ooxmlIsMalformed'); });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('兼容性检查');
+  expect(api).not.toHaveBeenCalled();
+  expect(ranges.selection.insertHtml).not.toHaveBeenCalled();
+});
+test('web rechecks structures added while the service is running', async () => {
+  const ranges = setupWeb();
+  jest.mocked(api).mockImplementationOnce(async () => {
+    ranges.body.ooxml = webPackage('<w:p><w:r><w:t>Original</w:t><w:drawing/></w:r></w:p>');
+    return { html: '<p>译文</p>' } as any;
+  });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('图片');
+  expect(ranges.selection.insertHtml).not.toHaveBeenCalled();
+});
+test('web rechecks after backup persistence before replacing text', async () => {
+  const ranges = setupWeb();
+  ranges.storage.saveAsync.mockImplementationOnce(cb => {
+    ranges.body.ooxml = webPackage('<w:tbl/>');
+    cb({ status: 'succeeded' });
+  });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('表格');
+  expect(ranges.selection.insertHtml).not.toHaveBeenCalled();
+});
+
 function setup() {
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID } });
   const values = new Map<string, unknown>();

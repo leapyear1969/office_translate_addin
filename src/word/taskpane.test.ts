@@ -4,7 +4,7 @@ import { join } from 'path';
 const settle = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 const button = (id: string) => document.getElementById(id) as HTMLButtonElement;
 
-async function setup(mode = 'never', excluded: string[] = []) {
+async function setup(mode = 'never', excluded: string[] = [], web = false) {
   jest.resetModules();
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'taskpane.html'), 'utf8');
   const translateDocument = jest.fn(async (..._args: any[]) => {});
@@ -24,11 +24,18 @@ async function setup(mode = 'never', excluded: string[] = []) {
     AsyncResultStatus: { Succeeded: 'succeeded' }, VisibilityMode: { taskpane: 'Taskpane' },
     actions: { associate: (name: string, fn: Function) => { commands[name] = fn; } },
     addin: { showAsTaskpane: jest.fn(async () => {}), onVisibilityModeChanged: jest.fn(async () => {}) },
-    context: { document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
+    PlatformType: { OfficeOnline: 'OfficeOnline' },
+    context: { platform: web ? 'OfficeOnline' : undefined, document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
   };
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
   return { translateDocument, restoreOriginalBody, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
+
+test.each([true, false])('backup notice is only shown on web: %s', async web => {
+  await setup('never', [], web);
+  expect(button('web-backup-notice').hidden).toBe(!web);
+  expect(button('web-backup-notice').textContent).toContain('翻译前请先备份');
+});
 
 test('manual scopes use saved language without detecting document language', async () => {
   const { translateDocument, api } = await setup();

@@ -8,7 +8,7 @@ async function setup(mode = 'never', excluded: string[] = []) {
   jest.resetModules();
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'taskpane.html'), 'utf8');
   const translateDocument = jest.fn(async (..._args: any[]) => {});
-  const restoreOriginalBody = jest.fn(async () => {});
+  const restoreOriginalBody = jest.fn(async () => ({ restored: 1, skipped: 0 }));
   const api = jest.fn(async () => ({ language: 'en', score: 1 }));
   const authenticate = jest.fn(async () => ({ token: 'token', user: { displayName: 'User', mail: 'user@example.com' } }));
   jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody }));
@@ -103,7 +103,7 @@ test('restoration requires explicit confirmation and does not authenticate or tr
   expect(restoreOriginalBody).toHaveBeenCalledTimes(1);
   expect(authenticate).not.toHaveBeenCalled();
   expect(translateDocument).not.toHaveBeenCalled();
-  expect(button('status').textContent).toContain('已恢复首次翻译前的正文');
+  expect(button('status').textContent).toContain('已恢复 1 处翻译的原文');
 });
 
 test('failed restoration reports an error and permits retry', async () => {
@@ -141,4 +141,13 @@ test('logout invalidates a pending login response', async () => {
   await settle();
   expect(button('account-name').textContent).toBe('已注销');
   expect(button('translate-selection').disabled).toBe(true);
+});
+
+
+test('restoration reports skipped edits in the panel', async () => {
+  const { restoreOriginalBody } = await setup();
+  restoreOriginalBody.mockResolvedValueOnce({ restored: 1, skipped: 2 });
+  button('restore-original').click(); button('confirm-restore').click(); await settle();
+  expect(button('status').textContent).toContain('已恢复 1 处翻译；2 处');
+  expect(button('status').textContent).toContain('已保留当前编辑');
 });

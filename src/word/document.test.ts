@@ -1,154 +1,208 @@
 import { translateDocument, restoreOriginalBody } from './document';
 import { api, authenticate } from '../shared/api';
+import { rangeBackups, saveRangeBackups, TAG_PREFIX } from './backup';
+import { randomUUID } from 'crypto';
 jest.mock('../shared/api');
 
 function setup() {
-  const values = new Map<string, string>();
-  const storage = { get: jest.fn((key: string) => values.get(key)),
-    set: jest.fn((key: string, value: string) => values.set(key, value)),
+  (globalThis as any).crypto = { randomUUID };
+  const values = new Map<string, unknown>();
+  const storage = {
+    get: jest.fn((key: string) => values.get(key)),
+    set: jest.fn((key: string, value: unknown) => values.set(key, value)),
     remove: jest.fn((key: string) => values.delete(key)),
-    saveAsync: jest.fn((cb: Function) => cb({ status: 'succeeded' })) };
+    saveAsync: jest.fn((cb: Function) => cb({ status: 'succeeded' })),
+  };
   (globalThis as any).Office = { context: { document: { settings: storage } }, AsyncResultStatus: { Succeeded: 'succeeded' } };
-  const makeRange = () => ({ text: 'Original', load: jest.fn(), getHtml: jest.fn(() => ({ value: '<p>Original</p>' })),
-    getOoxml: jest.fn(() => ({ value: '<original/>' })), insertHtml: jest.fn() });
+  const controls: any[] = [];
+  const makeRange = () => {
+    const range: any = {
+      text: 'Original', html: '<p>Original</p>', ooxml: '<original/>', relation: 'Before',
+      load: jest.fn(), getHtml: jest.fn(() => ({ value: range.html })),
+      getOoxml: jest.fn(() => ({ value: range.ooxml })),
+      compareLocationWith: jest.fn(() => ({ value: range.relation })),
+      insertContentControl: jest.fn(() => {
+        const control: any = {
+          tag: '', title: '', getRange: jest.fn(() => range),
+          insertHtml: jest.fn((html: string) => { range.html = html; range.text = '译文'; }),
+          insertOoxml: jest.fn((xml: string) => { range.ooxml = xml; range.text = 'Original'; range.html = '<p>Original</p>'; }),
+          delete: jest.fn(() => { controls.splice(controls.indexOf(control), 1); }),
+        };
+        controls.push(control);
+        return control;
+      }),
+    };
+    return range;
+  };
   const paragraph = makeRange();
   const body = makeRange();
-  const selection = { ...makeRange(), paragraphs: { getFirst: () => ({ getRange: () => paragraph }) } };
-  const context = { document: { body: { getRange: () => body, insertOoxml: jest.fn() }, getSelection: jest.fn(() => selection) },
-    sync: jest.fn(async () => {}), trackedObjects: { add: jest.fn(), remove: jest.fn() } };
+  const selection = makeRange();
+  selection.paragraphs = { getFirst: () => ({ getRange: () => paragraph }) };
+  const collection = { items: controls, load: jest.fn(), getByTag: (tag: string) => ({
+    items: controls.filter(control => control.tag === tag), load: jest.fn(),
+  }) };
+  const context = {
+    document: { contentControls: collection, body: { getRange: () => body, insertOoxml: jest.fn() }, getSelection: jest.fn(() => selection) },
+    sync: jest.fn(async () => {}), trackedObjects: { add: jest.fn(), remove: jest.fn() },
+  };
   (globalThis as any).Word = { run: (fn: Function) => fn(context), InsertLocation: { replace: 'Replace' } };
   jest.mocked(authenticate).mockResolvedValue({ token: 'token', user: {} as any });
   jest.mocked(api).mockResolvedValue({ html: '<p>译文</p>' });
-  return { context, selection, paragraph, body, storage };
+  return { context, selection, paragraph, body, storage, controls };
 }
 
-test.each(['selection', 'paragraph', 'body'] as const)('replaces only the captured %s range using the shared authenticated API', async scope => {
+test.each(['selection', 'paragraph', 'body'] as const)('backs up and translates only the %s range', async scope => {
   const ranges = setup();
+  ranges[scope].ooxml = `<${scope}/>`;
   await translateDocument(scope, 'ja');
-  expect(api).toHaveBeenCalledWith('/api/translate', 'token', { html: '<p>Original</p>', to: 'ja' });
-  for (const name of ['selection', 'paragraph', 'body'] as const) {
-    expect(ranges[name].insertHtml).toHaveBeenCalledTimes(name === scope ? 1 : 0);
-  }
+  expect(rangeBackups()[0].originalOoxml).toBe(`<${scope}/>`);
+  expect(rangeBackups()[0].translatedText).toBe('译文');
+  expect(ranges.controls[0].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+  expect(ranges.context.document.body.insertOoxml).not.toHaveBeenCalled();
   expect(ranges.context.trackedObjects.remove).toHaveBeenCalledWith(ranges[scope]);
 });
 
-test('rejects an empty selection without authentication or a write', async () => {
-  const { selection } = setup(); selection.text = '  ';
-  await expect(translateDocument('selection', 'zh-Hans')).rejects.toThrow('请先选中');
-  expect(authenticate).not.toHaveBeenCalled();
-  expect(selection.insertHtml).not.toHaveBeenCalled();
-});
-
-test.each(['selection', 'paragraph', 'body'] as const)('export serialization changes do not block unchanged %s text', async scope => {
-  const ranges = setup();
-  const range = ranges[scope];
-  range.getHtml.mockReturnValueOnce({ value: '<p id="export-1">Original</p>' });
-  jest.mocked(api).mockImplementationOnce(async () => {
-    range.getHtml.mockReturnValue({ value: '<p id="export-2"><span>Original</span></p>' });
-    return { html: '<p>译文</p>' } as any;
-  });
-  await translateDocument(scope, 'zh-Hans');
-  expect(range.insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
-  expect(range.getHtml).toHaveBeenCalledTimes(1);
-});
-
-test.each(['Edited', '', 'Original ', 'original'])('reloads text and rejects edits even when HTML is unchanged: %j', async edited => {
-  const { selection, context } = setup();
-  context.sync.mockImplementation(async () => {
-    if (selection.load.mock.calls.length === 2) selection.text = edited;
-  });
-  await expect(translateDocument('selection', 'zh-Hans')).rejects.toThrow('原文已更改');
-  expect(selection.load).toHaveBeenCalledTimes(2);
-  expect(selection.insertHtml).not.toHaveBeenCalled();
-});
-
-test.each(['selection', 'paragraph', 'body'] as const)('OOXML metadata changes when saving backup do not block %s translation', async scope => {
-  const ranges = setup();
-  ranges.storage.saveAsync.mockImplementationOnce(cb => {
-    ranges[scope].getOoxml.mockReturnValue({ value: '<package-with-updated-settings/>' });
-    cb({ status: 'succeeded' });
-  });
-  await translateDocument(scope, 'ja');
-  expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
-  expect(ranges.storage.get('wordTranslation.originalBody.v1')).toBe('<original/>');
-});
-
-test('a selection change during authentication does not redirect the write', async () => {
-  const { selection, body, context } = setup();
-  jest.mocked(authenticate).mockImplementationOnce(async () => {
-    context.document.getSelection.mockReturnValue(body as any);
-    return { token: 'token', user: {} as any };
-  });
-  await translateDocument('selection', 'zh-Hans');
-  expect(selection.insertHtml).toHaveBeenCalled();
-  expect(body.insertHtml).not.toHaveBeenCalled();
-});
-
-test('cancellation prevents a pending translation from writing', async () => {
-  const { body } = setup();
-  await expect(translateDocument('body', 'zh-Hans', () => false)).rejects.toThrow('取消翻译');
-  expect(body.insertHtml).not.toHaveBeenCalled();
-});
-
-test.each([null, '', ' '.repeat(3), 'x'.repeat(1000001)])('invalid translation leaves the document unchanged', async html => {
-  const { selection } = setup(); jest.mocked(api).mockResolvedValueOnce({ html });
-  await expect(translateDocument('selection', 'zh-Hans')).rejects.toThrow('译文无效');
-  expect(selection.insertHtml).not.toHaveBeenCalled();
-});
-
-test('network failure releases the tracked range without writing', async () => {
-  const { selection, context } = setup(); jest.mocked(api).mockRejectedValueOnce(new Error('网络失败'));
-  await expect(translateDocument('selection', 'zh-Hans')).rejects.toThrow('网络失败');
-  expect(selection.insertHtml).not.toHaveBeenCalled();
-  expect(context.trackedObjects.remove).toHaveBeenCalledWith(selection);
-});
-
-test('saves the entire original body before replacing a selection and preserves the first backup', async () => {
-  const { body, storage, selection } = setup();
-  body.getOoxml.mockReturnValue({ value: '<whole-original-body/>' });
-  storage.saveAsync.mockImplementation(cb => {
-    expect(selection.insertHtml).not.toHaveBeenCalled();
-    cb({ status: 'succeeded' });
-  });
+test('restores translation while preserving edits in other ranges, without authentication', async () => {
+  const { selection, body, controls } = setup();
   await translateDocument('selection', 'ja');
-  body.getOoxml.mockReturnValue({ value: '<translated-body/>' });
-  await translateDocument('selection', 'ja');
-  expect(storage.set).toHaveBeenCalledTimes(1);
-  expect(storage.set).toHaveBeenCalledWith('wordTranslation.originalBody.v1', '<whole-original-body/>');
-});
-
-test('backup save failure prevents replacement and allows retry', async () => {
-  const { storage, selection } = setup();
-  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
-  await expect(translateDocument('selection', 'ja')).rejects.toThrow('保存原文备份失败');
-  expect(selection.insertHtml).not.toHaveBeenCalled();
-  expect(storage.get('wordTranslation.originalBody.v1')).toBeUndefined();
-  await translateDocument('selection', 'ja');
-  expect(selection.insertHtml).toHaveBeenCalledTimes(1);
-});
-
-test('edits during backup persistence prevent translation from overwriting the selection', async () => {
-  const { storage, selection } = setup();
-  storage.saveAsync.mockImplementationOnce(cb => {
-    selection.text = 'Edited';
-    cb({ status: 'succeeded' });
-  });
-  await expect(translateDocument('selection', 'ja')).rejects.toThrow('原文已更改');
-  expect(selection.insertHtml).not.toHaveBeenCalled();
-});
-
-test('restores persisted OOXML without authentication and retains backup after restoration', async () => {
-  const { storage, context } = setup();
-  storage.set('wordTranslation.originalBody.v1', '<persisted-original/>');
-  await restoreOriginalBody();
-  expect(context.document.body.insertOoxml).toHaveBeenCalledWith('<persisted-original/>', 'Replace');
+  const control = controls[0];
+  body.text = 'Later saved edits elsewhere';
+  jest.mocked(authenticate).mockClear(); jest.mocked(api).mockClear();
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
+  expect(selection.text).toBe('Original');
+  expect(body.text).toBe('Later saved edits elsewhere');
+  expect(control.delete).toHaveBeenCalledWith(true);
   expect(authenticate).not.toHaveBeenCalled();
   expect(api).not.toHaveBeenCalled();
-  expect(storage.get('wordTranslation.originalBody.v1')).toBe('<persisted-original/>');
+  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
 });
 
-test('missing backup leaves the document unchanged', async () => {
-  const { context } = setup();
-  await expect(restoreOriginalBody()).rejects.toThrow('没有保存的原文备份');
+test.each(['text', 'html'])('skips edited translation %s and restores other independent translations', async field => {
+  const { selection, paragraph, controls } = setup();
+  await translateDocument('selection', 'ja');
+  await translateDocument('paragraph', 'ja');
+  selection[field] = field === 'text' ? 'User correction' : '<p><b>译文</b></p>';
+  const conflicted = controls[0];
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 1 });
+  expect(conflicted.insertOoxml).not.toHaveBeenCalled();
+  expect(paragraph.text).toBe('Original');
+  expect(selection[field]).toBe(field === 'text' ? 'User correction' : '<p><b>译文</b></p>');
+});
+
+test('new translation after restoration backs up the latest edited original', async () => {
+  const { selection, controls } = setup();
+  await translateDocument('selection', 'ja');
+  await restoreOriginalBody();
+  selection.text = 'Updated original'; selection.html = '<p>Updated original</p>'; selection.ooxml = '<updated/>';
+  await translateDocument('selection', 'ja');
+  const control = controls[0];
+  await restoreOriginalBody();
+  expect(control.insertOoxml).toHaveBeenCalledWith('<updated/>', 'Replace');
+});
+
+test('persisted records restore after module reload and retain originals for Word undo', async () => {
+  const { controls } = setup();
+  await translateDocument('selection', 'ja');
+  const control = controls[0];
+  jest.resetModules();
+  const reloaded = require('./document');
+  expect(await reloaded.restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
+  control.insertHtml('<p>译文</p>'); controls.push(control);
+  expect(await reloaded.restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
+});
+
+test.each(['Equal', 'Inside', 'Contains', 'OverlapsBefore', 'OverlapsAfter'])('rejects overlapping translation: %s', async relation => {
+  const { selection } = setup();
+  await translateDocument('selection', 'ja');
+  selection.relation = relation;
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('尚未恢复');
+  expect(selection.insertContentControl).toHaveBeenCalledTimes(1);
+});
+
+test('deleted controls never cause fallback to whole-document restoration', async () => {
+  const { controls, context } = setup();
+  await translateDocument('selection', 'ja');
+  controls.splice(0);
+  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
   expect(context.document.body.insertOoxml).not.toHaveBeenCalled();
+});
+
+test('duplicate tags are skipped rather than restoring the wrong copy', async () => {
+  const { controls } = setup();
+  await translateDocument('selection', 'ja');
+  controls.push(controls[0]);
+  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 1 });
+  expect(controls[0].insertOoxml).not.toHaveBeenCalled();
+});
+
+test('legacy backup cannot overwrite later edits', async () => {
+  const { storage, context } = setup();
+  storage.set('wordTranslation.originalBody.v1', '<old-body/>');
+  await expect(restoreOriginalBody()).rejects.toThrow('旧版整篇备份');
+  expect(context.document.body.insertOoxml).not.toHaveBeenCalled();
+});
+
+test('backup persistence failure prevents replacement and permits retry', async () => {
+  const { storage, selection } = setup();
+  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('保存翻译范围备份失败');
+  expect(selection.insertContentControl).not.toHaveBeenCalled();
+  expect(rangeBackups()).toEqual([]);
+  await translateDocument('selection', 'ja');
+  expect(selection.insertContentControl).toHaveBeenCalledTimes(1);
+});
+
+test('checkpoint failure retains original and skips uncertain translation on restore', async () => {
+  const { storage, controls } = setup();
+  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'succeeded' }))
+    .mockImplementationOnce(cb => cb({ status: 'failed' }));
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('译文已写入');
+  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+  expect(rangeBackups()[0].translatedHtml).toBeUndefined();
+  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 1 });
+  expect(controls[0].insertOoxml).not.toHaveBeenCalled();
+});
+
+test.each(['text', 'html'])('edits to %s during backup persistence cancel replacement', async field => {
+  const { storage, selection } = setup();
+  storage.saveAsync.mockImplementationOnce(cb => { selection[field] = 'Edited'; cb({ status: 'succeeded' }); });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('已更改');
+  expect(selection.insertContentControl).not.toHaveBeenCalled();
+});
+
+test('selection changes during authentication do not redirect translation', async () => {
+  const { selection, body, context } = setup();
+  jest.mocked(authenticate).mockImplementationOnce(async () => {
+    context.document.getSelection.mockReturnValue(body);
+    return { token: 'token', user: {} as any };
+  });
+  await translateDocument('selection', 'ja');
+  expect(selection.insertContentControl).toHaveBeenCalled();
+  expect(body.insertContentControl).not.toHaveBeenCalled();
+});
+
+test.each([null, '', ' '.repeat(3), 'x'.repeat(1000001)])('invalid translation is not written (%#)', async html => {
+  const { selection } = setup(); jest.mocked(api).mockResolvedValueOnce({ html });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('译文无效');
+  expect(selection.insertContentControl).not.toHaveBeenCalled();
+});
+
+test('empty selection, cancellation and network failure never replace content', async () => {
+  const { selection } = setup();
+  selection.text = '';
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('请先选中');
+  selection.text = 'Original';
+  await expect(translateDocument('selection', 'ja', () => false)).rejects.toThrow('取消');
+  jest.mocked(api).mockRejectedValueOnce(new Error('网络失败'));
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('网络失败');
+  expect(selection.insertContentControl).not.toHaveBeenCalled();
+});
+
+test('failed settings write preserves previous range backups', async () => {
+  const { storage } = setup();
+  const original = [{ tag: TAG_PREFIX + 'one', originalOoxml: '<one/>' }];
+  await saveRangeBackups(original);
+  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
+  await expect(saveRangeBackups([])).rejects.toThrow('保存');
+  expect(rangeBackups()).toEqual(original);
 });

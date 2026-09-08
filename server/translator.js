@@ -30,7 +30,7 @@ async function translateHtml(html, target, translate) {
     node.translatedParts = translated;
   }
   for (let offset = 0; offset < parts.length;) {
-    if (Date.now() - started > 75000) throw Object.assign(new Error('邮件翻译耗时过长，原文保持不变，请重试。'), { status: 504 });
+    if (Date.now() - started > 75000) throw Object.assign(new Error('内容翻译耗时过长，原文保持不变，请重试。'), { status: 504 });
     const batch = [];
     let count = 0;
     while (offset < parts.length && batch.length < 100 && count + parts[offset].text.length <= 45000) {
@@ -51,7 +51,7 @@ async function translateHtml(html, target, translate) {
   if (!parts.length) return html;
   nodes.forEach(node => { node.data = node.translatedParts.join(''); });
   const result = $.html();
-  if (result.length > 1000000) throw new Error('译文超过 Outlook 显示大小限制。');
+  if (result.length > 1000000) throw new Error('译文超过 1,000,000 字符限制。');
   return result;
 }
 
@@ -89,7 +89,7 @@ function createTranslator(config) {
     detect: html => detectHtml(html, async text => {
       const response = await call('detect', [text]);
       const result = response?.[0];
-      if (typeof result?.language !== 'string' || typeof result?.score !== 'number') throw new Error('无法识别邮件语言。');
+      if (typeof result?.language !== 'string' || typeof result?.score !== 'number') throw new Error('无法识别内容语言。');
       return { language: result.language, score: result.score };
     }),
   };

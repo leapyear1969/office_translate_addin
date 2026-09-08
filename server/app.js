@@ -28,7 +28,7 @@ function createApp(config, dependencies) {
   app.get('/health', (_req, res) => res.json({ ok: true }));
   app.use('/api', async (req, res, next) => {
     const match = /^Bearer (\S+)$/.exec(req.get('Authorization') || '');
-    if (!match) return res.status(401).json({ error: '请先通过 Outlook SSO 登录。' });
+    if (!match) return res.status(401).json({ error: '请先通过 Office SSO 登录。' });
     try { req.token = match[1]; req.identity = await services.authenticate(req.token); next(); }
     catch (error) { res.status(error.status || 401).json({ error: error.status ? error.message : 'SSO 认证失败，请重新登录。' }); }
   });
@@ -38,7 +38,7 @@ function createApp(config, dependencies) {
   app.get('/api/me', route(async (req, res) => res.json(await services.profile(req.token, req.identity))));
   function validateHtml(req, res) {
     if (typeof req.body?.html !== 'string' || !req.body.html || req.body.html.length > 1000000) {
-      res.status(400).json({ error: '邮件正文为空或超过 1,000,000 字符限制。' }); return false;
+      res.status(400).json({ error: '翻译内容为空或超过 1,000,000 字符限制。' }); return false;
     }
     return true;
   }
@@ -55,7 +55,7 @@ function createApp(config, dependencies) {
   app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在。' }));
   app.use((error, _req, res, _next) => {
     const status = error.type === 'entity.too.large' ? 413 : error instanceof SyntaxError ? 400 : error.status || 502;
-    res.status(status).json({ code: error.code === 'consent_required' ? error.code : undefined, error: status === 413 ? '邮件正文过大。' : status === 400 ? '请求格式无效。'
+    res.status(status).json({ code: error.code === 'consent_required' ? error.code : undefined, error: status === 413 ? '翻译内容过大。' : status === 400 ? '请求格式无效。'
       : error.status ? error.message : error.name === 'TimeoutError' ? '请求超时，请重试。' : '翻译服务请求失败，请稍后重试。' });
   });
   return app;

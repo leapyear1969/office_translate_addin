@@ -19,6 +19,6 @@ async function start() {
   } : await require('office-addin-dev-certs').getHttpsServerOptions();
   https.createServer(certificate, app)
     .on('error', error => { console.error(error.code === 'EADDRINUSE' ? `Port ${config.port} is already in use. Stop the other local instance first.` : 'HTTPS server failed to start.'); process.exitCode = 1; })
-    .listen(config.port, '0.0.0.0', () => console.log(`Outlook translation available at ${config.origin}`));
+    .listen(config.port, '0.0.0.0', () => console.log(`Office translation available at ${config.origin}`));
 }
 start().catch(() => { console.error('Server failed to start. Check port and TLS certificate configuration.'); process.exitCode = 1; });

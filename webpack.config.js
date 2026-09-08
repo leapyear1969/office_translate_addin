@@ -3,9 +3,11 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const devCerts = require("office-addin-dev-certs");
 const { readConfig } = require("./server/config");
+const { selectedHosts } = require("./scripts/hosts");
 const { createApp } = require("./server/app");
 
-module.exports = async (_env, argv) => {
+module.exports = async (env = {}, argv) => {
+  const hosts = selectedHosts(env.host);
   const isDevelopment = argv.mode === "development";
 
   return {
@@ -14,6 +16,7 @@ module.exports = async (_env, argv) => {
       taskpane: "./src/taskpane/taskpane.ts",
       original: "./src/taskpane/original.ts",
       consent: "./src/taskpane/consent.ts",
+      "word/taskpane": "./src/word/taskpane.ts",
     },
     devtool: isDevelopment ? "source-map" : false,
     resolve: {
@@ -29,6 +32,7 @@ module.exports = async (_env, argv) => {
       ],
     },
     plugins: [
+      new HtmlWebpackPlugin({ filename: "word/taskpane.html", template: "./src/word/taskpane.html", chunks: ["word/taskpane"], inject: "body" }),
       new HtmlWebpackPlugin({
         filename: "commands.html",
         template: "./src/commands/commands.html",
@@ -36,7 +40,7 @@ module.exports = async (_env, argv) => {
         inject: "body",
       }),
       new CopyWebpackPlugin({
-        patterns: [{ from: "src/assets", to: "assets" }, { from: "src/taskpane/taskpane.css", to: "taskpane.css" }],
+        patterns: [...hosts.map(host => ({ from: `manifest.${host}.xml`, to: `manifests/manifest.${host}.xml` })), { from: "src/assets", to: "assets" }, { from: "src/taskpane/taskpane.css", to: "taskpane.css" }],
       }),
       new HtmlWebpackPlugin({ filename: "taskpane.html", template: "./src/taskpane/taskpane.html", chunks: ["taskpane"], inject: "body" }),
       new HtmlWebpackPlugin({ filename: "original.html", template: "./src/taskpane/original.html", chunks: ["original"], inject: "body" }),

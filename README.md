@@ -1,4 +1,35 @@
-# Outlook 邮件翻译插件
+# Office 翻译插件（Outlook / Word）
+
+Outlook 邮件翻译与 Word 文档翻译共用本项目的认证、授权、语言检测和翻译后台。
+
+## 分宿主构建与清单
+
+| 命令 | 生成的清单 |
+|---|---|
+| `npm run build` | Outlook 和 Word 两份清单及完整前端 |
+| `npm run build:outlook` | Outlook 清单及完整前端 |
+| `npm run build:word` | Word 清单及完整前端 |
+| `npm run manifest:generate:outlook` | 仅生成根目录 `manifest.outlook.xml` 和兼容文件 `manifest.xml` |
+| `npm run manifest:generate:word` | 仅生成根目录 `manifest.word.xml` |
+| `npm run manifest:generate` | 生成两端清单及 Outlook 兼容文件 |
+| `npm run validate:outlook` / `npm run validate:word` | 校验对应根目录清单 |
+| `npm run validate` | 校验两端清单 |
+
+构建会将本次选中的清单复制到 `dist/manifests/`。`dist` 每次构建都会清理；同时部署两端时使用 `npm run build`。单宿主构建只筛选发布清单，仍打包完整前端，保证既有页面地址可用。根目录另一宿主的清单不会被单宿主生成命令覆盖，可能保留旧环境地址；部署请使用本次 `dist/manifests/` 中的清单。不要手改生成文件，应修改 `scripts/manifests/outlook.js` 或 `scripts/manifests/word.js` 后重新生成。`prod/manifest.xml` 和备份清单不参与构建，也不会自动更新。
+
+Outlook 继续使用 `/taskpane.html`、`/commands.html` 和原加载项 ID；根目录 `manifest.xml` 始终是 Outlook 的兼容副本。Word 使用 `/word/taskpane.html` 和独立加载项 ID，可与 Outlook 同时安装。`npm run dev-server` 同时提供两端页面与 API。
+
+## Word 文档翻译
+
+- 使用 `manifest.word.xml` 安装，功能区保留“翻译选项”；选中文字后右键提供“翻译成中文”和“翻译设置”。右键翻译固定使用简体中文，并打开面板显示进度或登录错误。
+- 面板提供“翻译选中文字”“翻译当前段落”“翻译正文全文”，使用已保存的目标语言。当前段落是光标所在段落；跨段落选区取第一个段落。正文全文不包括页眉、页脚、脚注等独立内容。
+- 保留账户、重新登录、浏览器授权、始终翻译/翻译前询问/从不自动翻译、目标语言和排除语言管理。偏好通过 Word 文档 settings 保存，随当前文档持久化，与 Outlook 的 roamingSettings 独立。
+- 打开面板、重新登录或保存设置后检查文档语言；关闭面板不启动后台自动翻译。手动翻译忽略自动翻译模式和排除语言。手动操作后暂缓自动检测，重新保存设置可恢复。自动翻译写回前如果面板已关闭则取消。
+- 译文直接替换所选范围，可使用 Word 撤销。范围在登录和请求前捕获并跟踪，写回前比较 OOXML；若原文或格式已修改则取消，避免覆盖编辑。HTML 往返不能保证复杂 Word 格式、域、内容控件或修订的完整保真；正式使用前用代表性文档验收。
+- 两端使用相同 `APP_BASE_URL`、`CLIENT_ID`、`SSO_RESOURCE` 和 `/api/me`、`/api/consent/start`、`/api/detect`、`/api/translate`。接口内容上限 1,000,000 字符，不支持 DOCX 上传。后台保持同源要求。
+- Word 清单要求 WordApi 1.3 和 SharedRuntime 1.1，让右键命令与面板共享运行状态，避免并行覆盖和重复命令失效。目标 Word 客户端还需支持 Office SSO；需在真实 Microsoft 365 Word 中验收客户端预授权、授权回调、右键菜单、撤销、表格和复杂格式。
+
+清单结构参考：[Microsoft 的 Word 清单示例](https://github.com/OfficeDev/generator-office/blob/master/src/app/templates/hosts/word/manifest.xml)、[WebApplicationInfo](https://learn.microsoft.com/en-us/javascript/api/manifest/webapplicationinfo)。
 
 阅读邮件时点击“翻译”菜单中的“翻译邮件”，将整封正文翻译为设置的目标语言并直接显示在正文位置。服务器原始邮件不被修改；重新打开邮件即可查看原文。另一个菜单项“翻译选项”打开 taskpane.html。
 
@@ -12,11 +43,19 @@ npm run build
 npm start
 ```
 
-开发时使用 `npm run dev-server`，同时提供 Webpack 页面和后端 API。不要同时启动两个服务，它们共用 3000 端口。服务地址为 https://localhost:3000，使用 Office 开发证书。浏览器只可预览设置布局，登录、设置保存和翻译需在 Outlook 中测试。
+开发时使用 `npm run dev-server`，同时提供 Webpack 页面和后端 API。不要同时启动两个服务，它们共用 3000 端口。服务地址为 https://localhost:3000，使用 Office 开发证书。浏览器只可预览设置布局，登录、设置保存和翻译需在对应的 Outlook 或 Word 客户端中测试。
 
 项目已创建 `.env` 并写入用户提供的翻译 Key。`.env` 和用户原有的 `.local` 均被 Git 忽略。新环境请从 `.env.example` 复制后填写，不要覆盖已有密钥。
 
 ## Entra 应用配置（世纪互联）
+
+### SSO 错误 13004
+
+`13004` 表示加载项清单中的资源地址无效。检查 `APP_BASE_URL` 与 `SSO_RESOURCE` 的域名和端口是否一致，同时确保 `SSO_RESOURCE` 等于 Entra 应用注册的 Application ID URI。例如，生产页面 `https://www.majun.fun:30260/word/taskpane.html` 对应 `api://www.majun.fun:30260/59a13c0d-6f19-4c66-b8fd-2fa80d0186bc`；不能搭配 `https://localhost:3000` 的页面。本地开发则需要在 Entra 中配置匹配的本地 URI，不能只修改清单中的 Resource。
+
+生成清单时会提前拒绝域名或端口不匹配的配置。修正 `.env` 后运行 `npm run build:word`，部署更新的前端并在 Word 中重新旁加载 `dist/manifests/manifest.word.xml`；若仍使用旧配置，移除旧测试加载项并重新加载。反复登录或执行 Graph 浏览器授权不能修复清单资源错误。
+
+参考：[微软 13004 排查说明](https://learn.microsoft.com/zh-cn/office/dev/add-ins/develop/troubleshoot-sso-in-office-add-ins#13004)。
 
 - Tenant ID：`d7125684-0e28-40b5-aba2-ea9580f2a201`
 - Client ID：`59a13c0d-6f19-4c66-b8fd-2fa80d0186bc`

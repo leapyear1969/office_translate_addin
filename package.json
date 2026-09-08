@@ -4,13 +4,19 @@
   "private": true,
   "description": "Outlook in-place mail translation with Azure China Translator and Office SSO",
   "scripts": {
-    "build": "node scripts/generate-manifest.js && webpack --mode production",
+    "build": "node scripts/generate-manifest.js all && webpack --mode production",
     "dev-server": "node scripts/generate-manifest.js && webpack serve --mode development",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "validate": "office-addin-manifest validate manifest.xml",
+    "validate": "npm run validate:outlook && npm run validate:word",
     "start": "node server/start.js",
-    "manifest:generate": "node scripts/generate-manifest.js"
+    "manifest:generate": "node scripts/generate-manifest.js",
+    "build:outlook": "node scripts/generate-manifest.js outlook && webpack --mode production --env host=outlook",
+    "build:word": "node scripts/generate-manifest.js word && webpack --mode production --env host=word",
+    "manifest:generate:outlook": "node scripts/generate-manifest.js outlook",
+    "validate:outlook": "office-addin-manifest validate manifest.outlook.xml",
+    "manifest:generate:word": "node scripts/generate-manifest.js word",
+    "validate:word": "office-addin-manifest validate manifest.word.xml"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",

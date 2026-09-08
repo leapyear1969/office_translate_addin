@@ -21,7 +21,7 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
 
 export async function authenticate(interactive = true): Promise<Session> {
   if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.auth?.getAccessToken) {
-    throw new Error('当前环境不支持 Office SSO，请在 Outlook 中打开插件。');
+    throw new Error('当前环境不支持 Office SSO，请在支持 Office SSO 的 Office 客户端中打开插件。');
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   let token: string;
@@ -32,6 +32,9 @@ export async function authenticate(interactive = true): Promise<Session> {
     ]);
   } catch (error) {
     const value = error as { code?: number; message?: string };
+    if (String(value.code) === '13004') {
+      throw new Error('SSO 登录失败（13004）：加载项清单的 SSO 资源地址无效。请检查页面地址与 WebApplicationInfo/Resource 的域名和端口是否一致，并确认 Resource 与 Entra Application ID URI 相同；修正后重新加载清单。');
+    }
     throw new Error(value.code ? `SSO 登录失败（${value.code}），请检查应用预授权或在翻译选项中重试。` : value.message || 'SSO 登录失败。');
   } finally { clearTimeout(timer); }
   try { return { token, user: await api<UserProfile>('/api/me', token) }; }

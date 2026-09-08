@@ -2,7 +2,7 @@
 test.each([
   ['success', '授权已完成。请关闭此窗口'],
   ['cancelled', '已取消授权'],
-  ['account_mismatch', '授权账户与 Outlook 账户不一致'],
+  ['account_mismatch', '授权账户与 Office 账户不一致'],
   ['failed', '授权未完成'],
 ])('shows browser completion state %s without Office runtime', (result, expected) => {
   jest.resetModules();

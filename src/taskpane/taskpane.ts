@@ -1,3 +1,4 @@
+import { setupAccount } from '../shared/account';
 import { api, authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
 import { bodyHtml, currentItem, isCurrent, showOriginalMessage, translateCurrentMessage } from '../shared/mail';
@@ -18,10 +19,28 @@ let restoring = false;
 let preserveOriginal = false;
 let dirty = false;
 let authorizing = false;
+let signedOut = false;
+const account = setupAccount(() => {
+  signedOut = true;
+  ++loginEpoch;
+  ++epoch;
+  session = undefined;
+  offeredItem = undefined;
+  element('translation-prompt').hidden = true;
+  element('browser-consent').hidden = true;
+  element('account-name').textContent = '已注销';
+  element('account-email').textContent = '';
+  element('signin').hidden = false;
+  element('signin').textContent = '重新登录';
+  element<HTMLButtonElement>('signin').disabled = false;
+  account.render();
+  updateMessageActions();
+  status('已注销当前面板账户。点击头像可重新登录。');
+});
 function updateMessageActions() {
   element('translate-message').textContent = `将邮件翻译为：${LANGUAGES[settings.target]}`;
   const disabled = translating || restoring || !currentItem();
-  ['show-original', 'translate-message', 'translate-now'].forEach(id => { element<HTMLButtonElement>(id).disabled = disabled; });
+  ['show-original', 'translate-message', 'translate-now'].forEach(id => { element<HTMLButtonElement>(id).disabled = disabled || (signedOut && id !== 'show-original'); });
 }
 function status(message: string, error = false) {
   element('status').textContent = message;
@@ -66,7 +85,7 @@ async function translateOffered() {
   if (offeredItem) await translateItem(offeredItem);
 }
 async function translateItem(item: Office.MessageRead | null) {
-  if (!item || translating || restoring) return;
+  if (!item || translating || restoring || signedOut) return;
   const ownEpoch = ++epoch;
   const ownAction = ++actionEpoch;
   preserveOriginal = false;
@@ -121,7 +140,8 @@ function readInitializationContext(): Promise<void> {
   });
 }
 async function signIn(interactive: boolean) {
-  if (authorizing) return;
+  if (authorizing || (signedOut && !interactive)) return;
+  account.close();
   const attempt = ++loginEpoch;
   element<HTMLButtonElement>('signin').disabled = true;
   element('account-name').textContent = '正在读取登录账户…';
@@ -134,9 +154,11 @@ async function signIn(interactive: boolean) {
       if (!interactive || failure.code !== 'consent_required' || !failure.token) throw error;
       authorizing = true;
       const url = await requestConsent(failure.token);
+      if (attempt !== loginEpoch) return;
       element<HTMLAnchorElement>('browser-consent-link').href = url;
       element('browser-consent').hidden = false;
       session = undefined;
+      account.render();
       element('account-name').textContent = '等待浏览器授权';
       element('account-email').textContent = '';
       element('signin').hidden = false;
@@ -146,6 +168,9 @@ async function signIn(interactive: boolean) {
     }
     if (attempt !== loginEpoch) return;
     session = authenticated;
+    signedOut = false;
+    account.render(session.user);
+    updateMessageActions();
     element('account-name').textContent = session.user.displayName || '已登录';
     element('account-email').textContent = session.user.mail;
     element('signin').hidden = false;
@@ -154,6 +179,7 @@ async function signIn(interactive: boolean) {
   } catch (error) {
     if (attempt !== loginEpoch) return;
     session = undefined;
+    account.render();
     element('account-name').textContent = '尚未完成登录';
     element('account-email').textContent = '';
     element('signin').hidden = false;

@@ -1,3 +1,4 @@
+import { setupAccount } from '../shared/account';
 import { api, authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
 import { documentHtml, translateDocument, restoreOriginalBody, Scope } from './document';
@@ -19,9 +20,27 @@ let authorizing = false;
 let visible = false;
 let initialized = false;
 let suppressAutomatic = false;
+let signedOut = false;
+const account = setupAccount(() => {
+  signedOut = true;
+  ++loginEpoch;
+  ++epoch;
+  session = undefined;
+  offeredHtml = undefined;
+  element('translation-prompt').hidden = true;
+  element('browser-consent').hidden = true;
+  element('account-name').textContent = '已注销';
+  element('account-email').textContent = '';
+  element('signin').hidden = false;
+  element('signin').textContent = '重新登录';
+  element<HTMLButtonElement>('signin').disabled = false;
+  account.render();
+  updateDocumentActions();
+  status('已注销当前面板账户。点击头像可重新登录。');
+});
 function updateDocumentActions() {
   ['translate-selection', 'translate-paragraph', 'translate-body', 'translate-now', 'restore-original', 'confirm-restore'].forEach(id => {
-    element<HTMLButtonElement>(id).disabled = translating;
+    element<HTMLButtonElement>(id).disabled = translating || (signedOut && id.startsWith('translate'));
   });
 }
 function status(message: string, error = false) {
@@ -62,7 +81,7 @@ async function inspectDocument() {
   } catch (error) { if (ownEpoch === epoch) status((error as Error).message, true); }
 }
 async function translateScope(scope: Scope, targetLanguage = settings.target, expectedHtml?: string) {
-  if (translating || authorizing) return;
+  if (translating || authorizing || signedOut) return;
   if (expectedHtml === undefined) suppressAutomatic = true;
   const actionEpoch = ++epoch;
   translating = true;
@@ -71,7 +90,7 @@ async function translateScope(scope: Scope, targetLanguage = settings.target, ex
   element('restore-prompt').hidden = true;
   status('正在翻译文档内容…');
   try {
-    await translateDocument(scope, targetLanguage, expectedHtml, () => expectedHtml === undefined || (visible && epoch === actionEpoch));
+    await translateDocument(scope, targetLanguage, expectedHtml, () => !signedOut && (expectedHtml === undefined || (visible && epoch === actionEpoch)));
     status('翻译完成，原文备份已保留。保存文档后，重新打开也可恢复原文。');
   } catch (error) {
     status((error as Error).message, true);
@@ -82,7 +101,8 @@ async function translateScope(scope: Scope, targetLanguage = settings.target, ex
   } finally { translating = false; updateDocumentActions(); }
 }
 async function signIn(interactive: boolean) {
-  if (authorizing) return;
+  if (authorizing || (signedOut && !interactive)) return;
+  account.close();
   const attempt = ++loginEpoch;
   element<HTMLButtonElement>('signin').disabled = true;
   element('account-name').textContent = '正在读取登录账户…';
@@ -95,9 +115,11 @@ async function signIn(interactive: boolean) {
       if (!interactive || failure.code !== 'consent_required' || !failure.token) throw error;
       authorizing = true;
       const url = await requestConsent(failure.token);
+      if (attempt !== loginEpoch) return;
       element<HTMLAnchorElement>('browser-consent-link').href = url;
       element('browser-consent').hidden = false;
       session = undefined;
+      account.render();
       element('account-name').textContent = '等待浏览器授权';
       element('account-email').textContent = '';
       element('signin').hidden = false;
@@ -107,6 +129,9 @@ async function signIn(interactive: boolean) {
     }
     if (attempt !== loginEpoch) return;
     session = authenticated;
+    signedOut = false;
+    account.render(session.user);
+    updateDocumentActions();
     element('account-name').textContent = session.user.displayName || '已登录';
     element('account-email').textContent = session.user.mail;
     element('signin').hidden = false;
@@ -115,6 +140,7 @@ async function signIn(interactive: boolean) {
   } catch (error) {
     if (attempt !== loginEpoch) return;
     session = undefined;
+    account.render();
     element('account-name').textContent = '尚未完成登录';
     element('account-email').textContent = '';
     element('signin').hidden = false;

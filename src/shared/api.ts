@@ -1,4 +1,4 @@
-export interface UserProfile { id: string; displayName: string; mail: string; tenantId: string }
+export interface UserProfile { id: string; displayName: string; mail: string; tenantId: string; photo?: string }
 export interface Session { token: string; user: UserProfile }
 declare const OfficeRuntime: { auth: { getAccessToken(options: { allowSignInPrompt: boolean; allowConsentPrompt: boolean }): Promise<string> } };
 

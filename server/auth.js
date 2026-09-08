@@ -60,7 +60,18 @@ function createAuth(config) {
       if (!response.ok) throw new Error('Graph profile failed');
       const user = await response.json();
       if (user.id !== identity.oid) throw new Error('Identity mismatch');
-      return { id: user.id, displayName: user.displayName || '', mail: user.mail || user.userPrincipalName || '', tenantId: identity.tid };
+      // A missing or unavailable photo must not prevent sign-in.
+      let photo;
+      try {
+        const image = await fetch(`${config.graphBase}/v1.0/me/photos/48x48/$value`, {
+          headers: { Authorization: `Bearer ${result.accessToken}` }, signal: AbortSignal.timeout(3000),
+        });
+        if (image.ok && image.headers.get('content-type')?.split(';')[0] === 'image/jpeg') {
+          const bytes = Buffer.from(await image.arrayBuffer());
+          if (bytes.length <= 100000) photo = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+        }
+      } catch { /* Use the display-name initial when a photo cannot be loaded. */ }
+      return { ...(photo ? { photo } : {}), id: user.id, displayName: user.displayName || '', mail: user.mail || user.userPrincipalName || '', tenantId: identity.tid };
     } catch (error) {
       if (error.errorCode === 'consent_required' || error.subError === 'consent_required'
         || /AADSTS65001\b/.test(error.message || '')) {

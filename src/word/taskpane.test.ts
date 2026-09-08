@@ -112,3 +112,30 @@ test('failed restoration reports an error and permits retry', async () => {
   button('restore-original').click(); button('confirm-restore').click(); await settle();
   expect(restoreOriginalBody).toHaveBeenCalledTimes(2);
 });
+
+test('logout blocks document commands and visibility login until explicit login', async () => {
+  const { authenticate, translateDocument, commands } = await setup();
+  button('account-avatar').click(); button('signout').click();
+  expect(button('account-name').textContent).toBe('已注销');
+  expect(button('translate-selection').disabled).toBe(true);
+  const visibility = (Office.addin.onVisibilityModeChanged as jest.Mock).mock.calls[0][0];
+  visibility({ visibilityMode: 'Taskpane' }); await settle();
+  await commands.translateSelectionChinese({ completed: jest.fn() });
+  expect(translateDocument).not.toHaveBeenCalled();
+  expect(authenticate).toHaveBeenCalledTimes(1);
+  button('account-avatar').click(); button('signin').click(); await settle();
+  expect(authenticate).toHaveBeenLastCalledWith(true);
+  expect(button('translate-selection').disabled).toBe(false);
+});
+
+test('logout invalidates a pending login response', async () => {
+  const { authenticate } = await setup();
+  let resolve: Function = () => {};
+  authenticate.mockImplementationOnce(() => new Promise<any>(done => { resolve = done; }));
+  button('signin').click();
+  button('signout').click();
+  resolve({ token: 'late', user: { displayName: 'Late', mail: 'late@example.com' } });
+  await settle();
+  expect(button('account-name').textContent).toBe('已注销');
+  expect(button('translate-selection').disabled).toBe(true);
+});

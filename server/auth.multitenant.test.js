@@ -54,3 +54,20 @@ test('reports customer consent requirement separately', async () => {
   await expect(createAuth(config).profile('assertion', { tid: customer, oid: 'user' }))
     .rejects.toMatchObject({ status: 403, code: 'consent_required' });
 });
+
+test('returns an account photo when available and tolerates a missing photo', async () => {
+  const profileFetch = global.fetch;
+  global.fetch = jest.fn(async (url, options) => {
+    if (url.endsWith('/photos/48x48/$value')) return {
+      ok: true, headers: new Headers({ 'content-type': 'image/jpeg' }),
+      arrayBuffer: async () => Buffer.from('photo'),
+    };
+    return profileFetch(url, options);
+  });
+  const auth = createAuth(config);
+  expect((await auth.profile('assertion', { tid: customer, oid: 'user' })).photo)
+    .toBe('data:image/jpeg;base64,cGhvdG8=');
+  global.fetch.mockImplementation(async (url, options) => url.endsWith('/photos/48x48/$value')
+    ? { ok: false, status: 404 } : profileFetch(url, options));
+  expect((await auth.profile('assertion', { tid: customer, oid: 'user' })).photo).toBeUndefined();
+});

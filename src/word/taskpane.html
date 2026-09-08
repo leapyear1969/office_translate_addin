@@ -8,14 +8,24 @@
 </head>
 <body>
   <main>
-    <h1><img class="heading-icon" src="/assets/icon-32.png" width="24" height="24" alt="">翻译选项</h1>
-    <section class="account" aria-label="当前账户">
-      <div class="account-details">
-        <p id="account-name">请在 Word 中打开此面板</p>
-        <p id="account-email" class="muted"></p>
+    <header class="pane-header">
+      <h1><img class="heading-icon" src="/assets/icon-32.png" width="24" height="24" alt="">翻译选项</h1>
+      <div class="account-control">
+        <button id="account-avatar" class="account-avatar" type="button" aria-label="用户账户" aria-haspopup="dialog" aria-expanded="false" aria-controls="account-menu">
+          <img id="account-photo" alt="" hidden><span id="account-initial" aria-hidden="true">人</span>
+        </button>
+        <section id="account-menu" class="account" role="dialog" aria-label="用户账户" hidden>
+          <div class="account-details">
+            <p id="account-name">请在 Word 中打开此面板</p>
+            <p id="account-email" class="muted"></p>
+          </div>
+          <div class="account-actions">
+            <button id="signin" type="button" hidden>重新登录</button>
+            <button id="signout" type="button" disabled>注销</button>
+          </div>
+        </section>
       </div>
-      <button id="signin" type="button" hidden>重新登录</button>
-    </section>
+    </header>
     <p id="browser-consent" hidden>如果浏览器没有打开，请<a id="browser-consent-link" target="_blank" rel="noopener noreferrer">点击此处继续授权</a>，或复制链接到默认浏览器。授权完成后请关闭浏览器窗口，并重新打开插件。</p>
     <section class="message-actions" aria-label="当前文档操作">
       <button id="translate-selection" type="button" class="primary" disabled>翻译选中文字</button>

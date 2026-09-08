@@ -15,16 +15,33 @@ test('places a decorative translation icon before the options title', () => {
   expect(heading.textContent?.trim()).toBe('翻译选项');
 });
 
-test('shows compact account details and sign-in before the message actions', async () => {
+test('opens the header account popup and closes it with Escape or an outside click', async () => {
   await setup();
-  const account = document.querySelector('.account')!;
-  expect(account.nextElementSibling?.id).toBe('browser-consent');
-  expect(account.nextElementSibling?.nextElementSibling?.className).toBe('message-actions');
-  expect(account.querySelector('.account-details #account-name')?.textContent).toBe('User');
-  expect(account.querySelector('.account-details #account-email')?.textContent).toBe('u@example.com');
-  expect(account.querySelector('.account-label')).toBeNull();
-  expect(button('signin').parentElement).toBe(account);
-  expect(button('signin').hidden).toBe(false);
+  expect(document.querySelector('.pane-header #account-avatar')).not.toBeNull();
+  expect(button('account-menu').hidden).toBe(true);
+  button('account-avatar').click();
+  expect(button('account-menu').hidden).toBe(false);
+  expect(document.activeElement).toBe(button('signin'));
+  expect(button('account-name').textContent).toBe('User');
+  expect(button('account-email').textContent).toBe('u@example.com');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  expect(button('account-menu').hidden).toBe(true);
+  expect(document.activeElement).toBe(button('account-avatar'));
+  button('account-avatar').click();
+  document.body.click();
+  expect(button('account-menu').hidden).toBe(true);
+});
+
+test('logout blocks translation and silent login on mail changes until explicit login', async () => {
+  const { authenticate, handlers } = await setup();
+  button('account-avatar').click(); button('signout').click();
+  expect(button('account-name').textContent).toBe('已注销');
+  expect(button('translate-message').disabled).toBe(true);
+  handlers.itemChanged(); await settle();
+  expect(authenticate).toHaveBeenCalledTimes(1);
+  button('account-avatar').click(); button('signin').click(); await settle();
+  expect(authenticate).toHaveBeenLastCalledWith(true);
+  expect(button('translate-message').disabled).toBe(false);
 });
 
 async function setup(context?: unknown, mode = 'never', language = 'zh-Hans') {

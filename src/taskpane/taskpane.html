@@ -8,6 +8,11 @@
 </head>
 <body>
   <main>
+    <section id="translation-prompt" hidden aria-label="翻译提示">
+      <p id="prompt-message"></p>
+      <button type="button" id="translate-now" class="primary">翻译这封邮件</button>
+      <button type="button" id="dismiss">暂不翻译</button>
+    </section>
     <header class="pane-header">
       <h1><img class="heading-icon" src="assets/icon-32.png" width="24" height="24" alt="">翻译选项</h1>
       <div class="account-control">
@@ -27,10 +32,6 @@
       </div>
     </header>
     <p id="browser-consent" hidden>如果浏览器没有打开，请<a id="browser-consent-link" target="_blank" rel="noopener noreferrer">点击此处继续授权</a>，或复制链接到默认浏览器。授权完成后请关闭浏览器窗口，并重新打开插件。</p>
-    <section class="message-actions" aria-label="当前邮件操作">
-      <button id="show-original" type="button" disabled>显示原文</button>
-      <button id="translate-message" type="button" class="primary" disabled>将邮件翻译为：中文（简体）</button>
-    </section>
     <form id="preferences">
       <fieldset id="settings-fields" disabled>
         <legend>收到其他语言的邮件时：</legend>
@@ -52,11 +53,6 @@
         <div class="footer"><button class="primary" type="submit" id="save">保存设置</button><span id="save-status" role="status" aria-live="polite"></span></div>
       </fieldset>
     </form>
-    <section id="translation-prompt" hidden aria-label="翻译提示">
-      <p id="prompt-message"></p>
-      <button type="button" id="translate-now" class="primary">翻译这封邮件</button>
-      <button type="button" id="dismiss">暂不翻译</button>
-    </section>
     <p id="status" role="status" aria-live="polite"></p>
   </main>
 </body>

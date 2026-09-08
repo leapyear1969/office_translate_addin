@@ -79,11 +79,11 @@ export function notifyOriginalDisplayed(item: Office.MessageRead, target?: strin
   if (!isCurrent(item)) return;
   const actionText = `将邮件翻译为：${LANGUAGES[target || loadSettings().target]}`;
   notifyMessageAction(item, '已显示原文。', actionText, 'translateMessage',
-    `已显示原文。请打开“翻译选项”，点击“${actionText}”重新翻译。`);
+    '已显示原文。请点击功能区中的“翻译邮件”重新翻译。');
 }
 function notifyTranslationComplete(item: Office.MessageRead): void {
   notifyMessageAction(item, '翻译完成。', '显示原文', 'showOriginal',
-    '翻译完成。请打开“翻译选项”，点击“显示原文”恢复原文。');
+    '翻译完成。请重新打开邮件查看原文。');
 }
 export async function translateCurrentMessage(target: string, session?: Session, expectedItem?: Office.MessageRead): Promise<void> {
   const item = expectedItem || currentItem();

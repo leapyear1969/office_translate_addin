@@ -15,6 +15,45 @@ test('places a decorative translation icon before the options title', () => {
   expect(heading.textContent?.trim()).toBe('翻译选项');
 });
 
+test('places the initially hidden translation prompt before the options header', () => {
+  document.documentElement.innerHTML = readFileSync(join(__dirname, 'taskpane.html'), 'utf8');
+  const prompt = document.getElementById('translation-prompt')!;
+  expect(document.querySelector('main')!.firstElementChild).toBe(prompt);
+  expect(prompt.hidden).toBe(true);
+  expect(prompt.querySelector('#translate-now')).not.toBeNull();
+  expect(prompt.querySelector('#dismiss')).not.toBeNull();
+});
+
+test('removes the standalone original and translation buttons without breaking initialization', async () => {
+  await setup();
+  expect(document.getElementById('show-original')).toBeNull();
+  expect(document.getElementById('translate-message')).toBeNull();
+  expect(document.querySelector('.message-actions')).toBeNull();
+  expect((document.getElementById('settings-fields') as HTMLFieldSetElement).disabled).toBe(false);
+});
+
+test('translates from the top prompt and hides it on completion', async () => {
+  const { api, setAsync } = await setup(undefined, 'ask', 'ja');
+  expect(button('translation-prompt').hidden).toBe(false);
+  expect(button('prompt-message').textContent).toBe('这封邮件使用英语，是否翻译为日语？');
+  button('translate-now').click();
+  await settle();
+  expect(api).toHaveBeenCalledWith('/api/translate', 'token', { html: '<p>Original</p>', to: 'ja' });
+  expect(setAsync).toHaveBeenCalledWith('<p>译文</p>', { coercionType: 'html' }, expect.any(Function));
+  expect(button('translation-prompt').hidden).toBe(true);
+  expect(button('status').textContent).toBe('翻译完成。点击提示栏中的“显示原文”或重新打开邮件即可查看原文。');
+});
+
+test('dismisses the top prompt without translating the message', async () => {
+  const { api, setAsync } = await setup(undefined, 'ask');
+  expect(button('translation-prompt').hidden).toBe(false);
+  button('dismiss').click();
+  expect(button('translation-prompt').hidden).toBe(true);
+  expect(api).toHaveBeenCalledTimes(1);
+  expect(api).toHaveBeenCalledWith('/api/detect', 'token', { html: '<p>Original</p>' });
+  expect(setAsync).not.toHaveBeenCalled();
+});
+
 test('opens the header account popup and closes it with Escape or an outside click', async () => {
   await setup();
   expect(document.querySelector('.pane-header #account-avatar')).not.toBeNull();
@@ -36,12 +75,12 @@ test('logout blocks translation and silent login on mail changes until explicit 
   const { authenticate, handlers } = await setup();
   button('account-avatar').click(); button('signout').click();
   expect(button('account-name').textContent).toBe('已注销');
-  expect(button('translate-message').disabled).toBe(true);
+  expect(button('translate-now').disabled).toBe(true);
   handlers.itemChanged(); await settle();
   expect(authenticate).toHaveBeenCalledTimes(1);
   button('account-avatar').click(); button('signin').click(); await settle();
   expect(authenticate).toHaveBeenLastCalledWith(true);
-  expect(button('translate-message').disabled).toBe(false);
+  expect(button('translate-now').disabled).toBe(false);
 });
 
 async function setup(context?: unknown, mode = 'never', language = 'zh-Hans', deferInitialization = false) {
@@ -113,28 +152,28 @@ test('silent missing consent offers a button without opening a dialog and cancel
   expect(document.getElementById('status')!.textContent).toBe('已取消授权');
 });
 
-test('shows both actions with the saved target language and translates even in never mode', async () => {
-  const { api, setAsync } = await setup(undefined, 'never', 'ja');
-  expect(button('show-original')).not.toBeNull();
-  expect(button('translate-message')?.textContent).toBe('将邮件翻译为：日语');
-  button('translate-message').click();
+test('translates from a notification with the saved target language even in never mode', async () => {
+  const { api, setAsync, itemHandlers } = await setup(undefined, 'never', 'ja');
+  expect(button('translation-prompt').hidden).toBe(true);
+  itemHandlers.contextChanged({ initializationContextData: { action: 'translateMessage' } });
   await settle();
   expect(api).toHaveBeenCalledWith('/api/translate', 'token', { html: '<p>Original</p>', to: 'ja' });
   expect(setAsync).toHaveBeenCalledWith('<p>译文</p>', { coercionType: 'html' }, expect.any(Function));
 });
 
-test('updates the action label and actual target only after saving preferences', async () => {
-  const { api } = await setup();
+test('updates the notification translation target only after saving preferences', async () => {
+  const { api, itemHandlers } = await setup();
   const target = document.getElementById('target-language') as HTMLSelectElement;
   target.value = 'en';
   target.dispatchEvent(new Event('change', { bubbles: true }));
-  expect(button('translate-message')?.textContent).toBe('将邮件翻译为：中文（简体）');
+  itemHandlers.contextChanged({ initializationContextData: { action: 'translateMessage' } });
+  await settle();
+  expect(api).toHaveBeenLastCalledWith('/api/translate', 'token', { html: '<p>Original</p>', to: 'zh-Hans' });
   document.getElementById('preferences')!.dispatchEvent(new Event('submit', { cancelable: true }));
   await settle();
-  expect(button('translate-message').textContent).toBe('将邮件翻译为：英语');
-  button('translate-message').click();
+  itemHandlers.contextChanged({ initializationContextData: { action: 'translateMessage' } });
   await settle();
-  expect(api).toHaveBeenCalledWith('/api/translate', 'token', { html: '<p>Original</p>', to: 'en' });
+  expect(api).toHaveBeenLastCalledWith('/api/translate', 'token', { html: '<p>Original</p>', to: 'en' });
 });
 
 test.each([JSON.stringify({ action: 'showOriginal' }), { action: 'showOriginal' }])('restores on notification launch without auto-translating it again: %p', async context => {
@@ -194,9 +233,9 @@ test('refreshes the restored-message notification target only after saving prefe
 });
 
 test('saving preferences after a failed restore does not claim the original is displayed', async () => {
-  const { item, setAsync } = await setup();
+  const { item, setAsync, itemHandlers } = await setup();
   setAsync.mockImplementation((_html, _options, cb) => cb({ status: 'failed' }));
-  button('show-original').click();
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
   await settle();
   const target = document.getElementById('target-language') as HTMLSelectElement;
   target.value = 'en';
@@ -207,8 +246,8 @@ test('saving preferences after a failed restore does not claim the original is d
 });
 
 test('does not change a translated notification to original when preferences are saved', async () => {
-  const { item } = await setup({ action: 'showOriginal' });
-  button('translate-message').click();
+  const { item, itemHandlers } = await setup({ action: 'showOriginal' });
+  itemHandlers.contextChanged({ initializationContextData: { action: 'translateMessage' } });
   await settle();
   item.notificationMessages.replaceAsync.mockClear();
   const target = document.getElementById('target-language') as HTMLSelectElement;
@@ -252,7 +291,7 @@ test('restoring during a failed settings save uses the last committed target', a
   target.value = 'en';
   target.dispatchEvent(new Event('change', { bubbles: true }));
   document.getElementById('preferences')!.dispatchEvent(new Event('submit', { cancelable: true }));
-  button('show-original').click();
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
   await settle();
   finishSave({ status: 'failed' });
   await settle();
@@ -265,10 +304,10 @@ test('restoring during a failed settings save uses the last committed target', a
 });
 
 test('a settings save completing during restore is reflected in the final notification', async () => {
-  const { item, setAsync } = await setup();
+  const { item, setAsync, itemHandlers } = await setup();
   let finishRestore!: (result: any) => void;
   setAsync.mockImplementationOnce((_html, _options, cb) => { finishRestore = cb; });
-  button('show-original').click();
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
   await settle();
   const target = document.getElementById('target-language') as HTMLSelectElement;
   target.value = 'en';
@@ -318,11 +357,11 @@ test('ignores repeated notification translation clicks while translation is pend
   itemHandlers.contextChanged(event);
   await settle();
   expect(api).toHaveBeenCalledTimes(1);
-  expect(button('translate-message').disabled).toBe(true);
+  expect(button('translate-now').disabled).toBe(true);
   finishTranslation({ html: '<p>译文</p>' });
   await settle();
   expect(setAsync).toHaveBeenCalledTimes(1);
-  expect(button('translate-message').disabled).toBe(false);
+  expect(button('translate-now').disabled).toBe(false);
 });
 
 test('does not automatically inspect after an in-flight sign-in is superseded by a notification action', async () => {
@@ -377,16 +416,19 @@ test('handles a notification while the options pane is already open', async () =
   expect(setAsync).toHaveBeenCalledWith('<p>Original</p>', { coercionType: 'html' }, expect.any(Function));
 });
 
-test('manual restore does not need authentication and reports failure in the options pane', async () => {
-  const { authenticate, setAsync } = await setup();
+test('notification restore does not need authentication and reports failure in the options pane', async () => {
+  const { authenticate, setAsync, itemHandlers } = await setup();
   authenticate.mockClear();
-  setAsync.mockImplementation((_html, _options, cb) => cb({ status: 'failed' }));
-  expect(button('show-original')).not.toBeNull();
-  button('show-original').click();
+  setAsync.mockImplementationOnce((_html, _options, cb) => cb({ status: 'failed' }));
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
   await settle();
   expect(authenticate).not.toHaveBeenCalled();
   expect(document.getElementById('status')!.textContent).toContain('原文显示失败');
-  expect(button('show-original').disabled).toBe(false);
+  expect(button('translate-now').disabled).toBe(false);
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
+  await settle();
+  expect(setAsync).toHaveBeenCalledTimes(2);
+  expect(button('status').textContent).toBe('已显示原文。');
 });
 
 test('ignores unknown initialization data', async () => {
@@ -394,14 +436,14 @@ test('ignores unknown initialization data', async () => {
   expect(setAsync).not.toHaveBeenCalled();
 });
 
-test('manual restoration invalidates a pending automatic language detection', async () => {
-  const { api, setAsync, handlers } = await setup(undefined, 'always');
+test('notification restoration invalidates a pending automatic language detection', async () => {
+  const { api, setAsync, handlers, itemHandlers } = await setup(undefined, 'always');
   api.mockClear(); setAsync.mockClear();
   let finishDetection!: (value: any) => void;
   api.mockImplementationOnce(() => new Promise(resolve => { finishDetection = resolve; }));
   handlers.itemChanged();
   await settle();
-  button('show-original').click();
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
   await settle();
   finishDetection({ language: 'en', score: 1 });
   await settle();
@@ -410,18 +452,20 @@ test('manual restoration invalidates a pending automatic language detection', as
   expect(setAsync).toHaveBeenCalledWith('<p>Original</p>', { coercionType: 'html' }, expect.any(Function));
 });
 
-test('disables both manual actions during translation and reenables them afterward', async () => {
-  const { api } = await setup();
+test('disables the prompt action during translation and reenables it afterward', async () => {
+  const { api, setAsync, itemHandlers } = await setup(undefined, 'ask');
   let finishTranslation!: (value: any) => void;
   api.mockImplementationOnce(() => new Promise(resolve => { finishTranslation = resolve; }));
-  button('translate-message').click();
+  button('translate-now').click();
   await settle();
-  expect(button('show-original').disabled).toBe(true);
-  expect(button('translate-message').disabled).toBe(true);
+  expect(button('translate-now').disabled).toBe(true);
+  itemHandlers.contextChanged({ initializationContextData: { action: 'showOriginal' } });
+  await settle();
+  expect(setAsync).not.toHaveBeenCalled();
   finishTranslation({ html: '<p>译文</p>' });
   await settle();
-  expect(button('show-original').disabled).toBe(false);
-  expect(button('translate-message').disabled).toBe(false);
+  expect(button('translate-now').disabled).toBe(false);
+  expect(setAsync).toHaveBeenCalledTimes(1);
 });
 
 test('resumes automatic translation after switching away from a restored message', async () => {
@@ -439,15 +483,15 @@ test('disables mail actions when there is no current message', async () => {
   (Office.context.mailbox as any).item = null;
   handlers.itemChanged();
   await settle();
-  expect(button('show-original').disabled).toBe(true);
-  expect(button('translate-message').disabled).toBe(true);
+  expect(button('translate-now').disabled).toBe(true);
+  expect(button('translation-prompt').hidden).toBe(true);
 });
 
 test('can restore the new message while a previous message translation is still pending', async () => {
   const { api, handlers, itemHandlers, item, setAsync } = await setup();
   let finishTranslation!: (value: any) => void;
   api.mockImplementationOnce(() => new Promise(resolve => { finishTranslation = resolve; }));
-  button('translate-message').click();
+  itemHandlers.contextChanged({ initializationContextData: { action: 'translateMessage' } });
   await settle();
   (Office.context.mailbox as any).item = { ...item, itemId: 'b' };
   handlers.itemChanged();

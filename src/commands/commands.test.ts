@@ -101,7 +101,7 @@ test('switches the same single-action notification back and forth with the displ
   expect(item.notificationMessages.replaceAsync.mock.calls.every(call => call[0] === 'mail-translation-status')).toBe(true);
 });
 
-test.each(['callback', 'throw'])('falls back to pane translation after restoration when notification actions fail: %s', async failure => {
+test.each(['callback', 'throw'])('falls back to ribbon translation after restoration when notification actions fail: %s', async failure => {
   const { item } = setup();
   item.notificationMessages.replaceAsync.mockImplementation((_key, value, cb) => {
     if (value.actions && failure === 'throw') throw new Error('Unsupported notification action');
@@ -110,7 +110,7 @@ test.each(['callback', 'throw'])('falls back to pane translation after restorati
   await expect(mail.showOriginalMessage()).resolves.toBeUndefined();
   expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith(
     'mail-translation-status', expect.objectContaining({
-      type: 'info', message: '已显示原文。请打开“翻译选项”，点击“将邮件翻译为：中文（简体）”重新翻译。',
+      type: 'info', message: '已显示原文。请点击功能区中的“翻译邮件”重新翻译。',
     }), expect.any(Function));
   expect(item.notificationMessages.replaceAsync.mock.calls.slice(-1)[0][1].actions).toBeUndefined();
 });
@@ -132,7 +132,7 @@ test('does not update the notification if the item changes before restoration co
   expect(item.notificationMessages.replaceAsync).not.toHaveBeenCalled();
 });
 
-test('points to translation options when Outlook rejects notification actions', async () => {
+test('points to reopening the message when Outlook rejects notification actions', async () => {
   const { item } = setup();
   item.notificationMessages.replaceAsync.mockImplementation((_key, value, cb) => {
     cb?.({ status: value.actions ? 'failed' : 'succeeded' });
@@ -140,7 +140,7 @@ test('points to translation options when Outlook rejects notification actions', 
   await translateCurrentMessage('zh-Hans');
   expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith(
     'mail-translation-status', expect.objectContaining({
-      type: 'info', message: '翻译完成。请打开“翻译选项”，点击“显示原文”恢复原文。',
+      type: 'info', message: '翻译完成。请重新打开邮件查看原文。',
     }), expect.any(Function));
 });
 

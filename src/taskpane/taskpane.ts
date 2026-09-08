@@ -38,9 +38,7 @@ const account = setupAccount(() => {
   status('已注销当前面板账户。点击头像可重新登录。');
 });
 function updateMessageActions() {
-  element('translate-message').textContent = `将邮件翻译为：${LANGUAGES[settings.target]}`;
-  const disabled = translating || restoring || !currentItem();
-  ['show-original', 'translate-message', 'translate-now'].forEach(id => { element<HTMLButtonElement>(id).disabled = disabled || (signedOut && id !== 'show-original'); });
+  element<HTMLButtonElement>('translate-now').disabled = translating || restoring || signedOut || !currentItem();
 }
 function refreshOriginalNotification() {
   const item = currentItem();
@@ -110,7 +108,7 @@ async function translateItem(item: Office.MessageRead | null) {
     status('正在翻译整封邮件…');
     // Reacquire SSO for each translation rather than retain expired access tokens.
     await translateCurrentMessage(settings.target, undefined, item);
-    if (ownEpoch === epoch) { element('translation-prompt').hidden = true; status('翻译完成。点击提示栏或此面板中的“显示原文”即可恢复原文。'); }
+    if (ownEpoch === epoch) { element('translation-prompt').hidden = true; status('翻译完成。点击提示栏中的“显示原文”或重新打开邮件即可查看原文。'); }
   } catch (error) { if (ownEpoch === epoch) status((error as Error).message, true); }
   finally { if (ownAction === actionEpoch) { translating = false; updateMessageActions(); } }
 }
@@ -253,8 +251,6 @@ element('preferences').addEventListener('submit', async event => {
   finally { fields.disabled = false; }
 });
 element('translate-now').addEventListener('click', () => void translateOffered());
-element('translate-message').addEventListener('click', () => void translateItem(currentItem()));
-element('show-original').addEventListener('click', () => void restoreOriginal());
 element('dismiss').addEventListener('click', () => { offeredItem = undefined; element('translation-prompt').hidden = true; });
 
 Office.onReady(info => {

@@ -129,7 +129,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
   } finally { busy = false; }
 }
 
-export interface RestoreResult { restored: number; skipped: number }
+export interface RestoreResult { restored: number; skipped: number; details?: string[]; cleaned?: number }
 export async function restoreOriginalBody(): Promise<RestoreResult> {
   if (busy) throw new Error('文档操作正在进行，请稍后重试。');
   busy = true;
@@ -146,8 +146,20 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
         const controls = context.document.contentControls.getByTag(record.tag);
         controls.load('items');
         await context.sync();
-        if (controls.items.length !== 1 || record.translatedText === undefined) {
-          if (controls.items.length) result.skipped++;
+        if (!controls.items.length) continue;
+        if (record.translatedText === undefined) {
+          // An incomplete operation has no trustworthy translated checkpoint.
+          // Retire its misleading wrapper, preserving every character.
+          controls.items.forEach(control => control.delete(true));
+          await syncStep(context, '清理未完成的翻译标记');
+          result.cleaned = (result.cleaned || 0) + controls.items.length;
+          continue;
+        }
+        if (controls.items.length !== 1) {
+          controls.items.forEach(control => { control.title = '翻译备份（标记重复，未恢复）'; });
+          await context.sync();
+          result.skipped++;
+          (result.details ||= []).push('标记重复，无法唯一定位原文');
           continue;
         }
         const control = controls.items[0];
@@ -158,7 +170,10 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
         // text, including whitespace. Restoration also restores the original
         // formatting within this control, as stated in the confirmation UI.
         if (range.text !== record.translatedText) {
+          control.title = '翻译备份（文字不匹配，未恢复）';
+          await context.sync();
           result.skipped++;
+          (result.details ||= []).push('当前文字与保存的译文不一致（可能已编辑或撤销），未覆盖');
           continue;
         }
         if (record.originalOoxml) control.insertOoxml(record.originalOoxml, Word.InsertLocation.replace);

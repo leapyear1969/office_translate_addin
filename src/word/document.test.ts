@@ -84,7 +84,7 @@ test.each(['User correction', '', '译文 '])('skips edited translation text %j 
   await translateDocument('paragraph', 'ja');
   selection.text = edited;
   const conflicted = controls[0];
-  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 1 });
+  expect(await restoreOriginalBody()).toMatchObject({ restored: 1, skipped: 1 });
   expect(conflicted.insertOoxml).not.toHaveBeenCalled();
   expect(paragraph.text).toBe('Original');
   expect(selection.text).toBe(edited);
@@ -153,7 +153,7 @@ test('duplicate tags are skipped rather than restoring the wrong copy', async ()
   const { controls } = setup();
   await translateDocument('selection', 'ja');
   controls.push(controls[0]);
-  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 1 });
+  expect(await restoreOriginalBody()).toMatchObject({ restored: 0, skipped: 1 });
   expect(controls[0].insertOoxml).not.toHaveBeenCalled();
 });
 
@@ -181,8 +181,10 @@ test('checkpoint failure retains original and skips uncertain translation on res
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('译文已写入');
   expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
   expect(rangeBackups()[0].translatedText).toBeUndefined();
-  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 1 });
-  expect(controls[0].insertOoxml).not.toHaveBeenCalled();
+  const incomplete = controls[0];
+  expect(await restoreOriginalBody()).toMatchObject({ restored: 0, skipped: 0, cleaned: 1 });
+  expect(incomplete.insertOoxml).not.toHaveBeenCalled();
+  expect(incomplete.delete).toHaveBeenCalledWith(true);
 });
 
 test.each(['Edited', '', 'Original ', 'original'])('text edits during backup persistence cancel replacement: %j', async edited => {
@@ -331,4 +333,29 @@ test('retry clears an old incomplete wrapper but leaves its text and backup inta
   expect(controls).not.toContain(old);
   expect(rangeBackups()[0].originalOoxml).toBe('<old/>');
   expect(body.text).toBe('Unrelated saved edits');
+});
+
+test('old recoverable title is corrected when current text already differs from the saved translation', async () => {
+  const { selection, controls } = setup();
+  await translateDocument('selection', 'ja');
+  const control = controls[0];
+  control.title = '翻译内容（可恢复原文）';
+  selection.text = 'Original restored via Word undo';
+  const result = await restoreOriginalBody();
+  expect(result).toMatchObject({ restored: 0, skipped: 1 });
+  expect(result.details?.[0]).toContain('可能已编辑或撤销');
+  expect(control.title).toBe('翻译备份（文字不匹配，未恢复）');
+  expect(control.insertOoxml).not.toHaveBeenCalled();
+  expect(selection.text).toBe('Original restored via Word undo');
+});
+
+test('incomplete legacy wrapper is cleared once without repeated skipped warnings', async () => {
+  const { selection } = setup();
+  const control = selection.insertContentControl();
+  control.tag = TAG_PREFIX + 'old-pending';
+  await saveRangeBackups([{ tag: control.tag, originalOoxml: '<original/>' }]);
+  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0, cleaned: 1 });
+  expect(selection.text).toBe('Original');
+  expect(rangeBackups()).toHaveLength(1);
+  expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
 });

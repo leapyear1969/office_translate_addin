@@ -1,7 +1,7 @@
 import { setupAccount } from '../shared/account';
 import { api, authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
-import { bodyHtml, currentItem, isCurrent, showOriginalMessage, translateCurrentMessage } from '../shared/mail';
+import { bodyHtml, currentItem, isCurrent, notifyOriginalDisplayed, showOriginalMessage, translateCurrentMessage } from '../shared/mail';
 import { LANGUAGES, loadSettings, saveSettings, Settings, shouldOfferTranslation } from '../shared/settings';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -41,6 +41,21 @@ function updateMessageActions() {
   element('translate-message').textContent = `将邮件翻译为：${LANGUAGES[settings.target]}`;
   const disabled = translating || restoring || !currentItem();
   ['show-original', 'translate-message', 'translate-now'].forEach(id => { element<HTMLButtonElement>(id).disabled = disabled || (signedOut && id !== 'show-original'); });
+}
+function refreshOriginalNotification() {
+  const item = currentItem();
+  if (!item || translating || restoring) return;
+  const ownAction = actionEpoch;
+  const savedTarget = settings.target;
+  try {
+    item.notificationMessages.getAllAsync(result => {
+      if (result.status !== Office.AsyncResultStatus.Succeeded || !isCurrent(item)
+        || ownAction !== actionEpoch || savedTarget !== settings.target) return;
+      // A ribbon command can change the display independently of this pane.
+      const notification = result.value.find(value => value.key === 'mail-translation-status');
+      if (notification?.message.startsWith('已显示原文。')) notifyOriginalDisplayed(item, savedTarget);
+    });
+  } catch { /* A label refresh must not prevent settings from being saved. */ }
 }
 function status(message: string, error = false) {
   element('status').textContent = message;
@@ -101,6 +116,8 @@ async function translateItem(item: Office.MessageRead | null) {
 }
 async function restoreOriginal() {
   if (translating || restoring) return;
+  const item = currentItem();
+  const restoreTarget = settings.target;
   const ownEpoch = ++epoch;
   const ownAction = ++actionEpoch;
   preserveOriginal = true;
@@ -110,16 +127,21 @@ async function restoreOriginal() {
   updateMessageActions();
   status('正在显示原文…');
   try {
-    await showOriginalMessage();
+    await showOriginalMessage(restoreTarget);
+    if (ownAction === actionEpoch && item && isCurrent(item) && restoreTarget !== settings.target) {
+      notifyOriginalDisplayed(item, settings.target);
+    }
     if (ownEpoch === epoch) status('已显示原文。');
   } catch (error) { if (ownEpoch === epoch) status((error as Error).message, true); }
   finally { if (ownAction === actionEpoch) { restoring = false; updateMessageActions(); } }
 }
-async function handleInitializationContext(data: unknown) {
+async function handleInitializationContext(data: unknown): Promise<boolean> {
   try {
     const context = typeof data === 'string' ? JSON.parse(data) : data;
-    if (context?.action === 'showOriginal') await restoreOriginal();
+    if (context?.action === 'showOriginal') { await restoreOriginal(); return true; }
+    if (context?.action === 'translateMessage') { await translateItem(currentItem()); return true; }
   } catch { /* Empty or unrelated launch data is not a mail action. */ }
+  return false;
 }
 function registerInitializationHandler() {
   const item = currentItem();
@@ -128,21 +150,25 @@ function registerInitializationHandler() {
     if (isCurrent(item)) void handleInitializationContext(event.initializationContextData);
   }, () => {});
 }
-function readInitializationContext(): Promise<void> {
+function readInitializationContext(): Promise<boolean> {
   const item = currentItem();
-  if (!item || typeof item.getInitializationContextAsync !== 'function') return Promise.resolve();
+  const ownAction = actionEpoch;
+  if (!item || typeof item.getInitializationContextAsync !== 'function') return Promise.resolve(false);
   return new Promise(resolve => {
     item.getInitializationContextAsync(result => {
+      // A newer notification event supersedes delayed launch data, including empty data.
+      if (ownAction !== actionEpoch) { resolve(true); return; }
       if (result.status === Office.AsyncResultStatus.Succeeded && isCurrent(item)) {
         void handleInitializationContext(result.value).then(resolve);
-      } else resolve();
+      } else resolve(false);
     });
   });
 }
-async function signIn(interactive: boolean) {
+async function signIn(interactive: boolean, inspect = true) {
   if (authorizing || (signedOut && !interactive)) return;
   account.close();
   const attempt = ++loginEpoch;
+  const ownAction = actionEpoch;
   element<HTMLButtonElement>('signin').disabled = true;
   element('account-name').textContent = '正在读取登录账户…';
   element('browser-consent').hidden = true;
@@ -175,7 +201,7 @@ async function signIn(interactive: boolean) {
     element('account-email').textContent = session.user.mail;
     element('signin').hidden = false;
     element('signin').textContent = '重新登录';
-    if (!preserveOriginal) { status(''); await inspectMessage(); }
+    if (inspect && !preserveOriginal && ownAction === actionEpoch) { status(''); await inspectMessage(); }
   } catch (error) {
     if (attempt !== loginEpoch) return;
     session = undefined;
@@ -184,7 +210,7 @@ async function signIn(interactive: boolean) {
     element('account-email').textContent = '';
     element('signin').hidden = false;
     element('signin').textContent = '登录并授权';
-    if (!preserveOriginal) status((error as Error).message, true);
+    if (inspect && !preserveOriginal && ownAction === actionEpoch) status((error as Error).message, true);
   } finally { authorizing = false; if (attempt === loginEpoch) element<HTMLButtonElement>('signin').disabled = false; }
 }
 
@@ -220,6 +246,7 @@ element('preferences').addEventListener('submit', async event => {
     const next = currentForm();
     await saveSettings(next); settings = next; dirty = false;
     updateMessageActions();
+    refreshOriginalNotification();
     element('save-status').textContent = '设置已保存';
     await inspectMessage();
   } catch (error) { element('save-status').textContent = (error as Error).message; }
@@ -252,5 +279,8 @@ Office.onReady(info => {
     void signIn(false);
   }, result => { if (result.status !== Office.AsyncResultStatus.Succeeded) status('当前客户端无法监听邮件切换，请重新打开面板以识别新邮件。'); });
   registerInitializationHandler();
-  void readInitializationContext().then(() => signIn(false));
+  const initialLogin = loginEpoch;
+  void readInitializationContext().then(handled => {
+    if (initialLogin === loginEpoch) return signIn(false, !handled);
+  });
 });

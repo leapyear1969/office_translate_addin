@@ -7,7 +7,7 @@ function setup() {
   const item = { itemId: 'a', body: { getAsync: jest.fn((_type, cb) => cb({ status: 'succeeded', value: '<p>Hello</p>' })) },
     display: { body: { setAsync } }, notificationMessages: { replaceAsync: jest.fn((_key, _value, cb) => cb?.({ status: 'succeeded' })) } };
   (globalThis as any).Office = { AsyncResultStatus: { Succeeded: 'succeeded' }, CoercionType: { Html: 'html' },
-    context: { mailbox: { item } }, MailboxEnums: { ItemNotificationMessageType: { InformationalMessage: 'info', ErrorMessage: 'error', InsightMessage: 'insightMessage' } } };
+    context: { mailbox: { item }, roamingSettings: { get: jest.fn() } }, MailboxEnums: { ItemNotificationMessageType: { InformationalMessage: 'info', ErrorMessage: 'error', InsightMessage: 'insightMessage' } } };
   (authenticate as jest.Mock).mockResolvedValue({ token: 'token', user: { id: 'u' } });
   (api as jest.Mock).mockResolvedValue({ html: '<p>你好</p>' });
   return { item, setAsync };
@@ -75,6 +75,61 @@ test('restores the original body without authentication or translation', async (
   expect(setAsync).toHaveBeenCalledWith('<p>Hello</p>', { coercionType: 'html' }, expect.any(Function));
   expect(authenticate).not.toHaveBeenCalled();
   expect(api).not.toHaveBeenCalled();
+});
+
+test.each([['zh-Hans', '中文（简体）'], ['ja', '日语']])('offers translation to the saved target after restoring: %s', async (target, label) => {
+  const { item } = setup();
+  (Office.context.roamingSettings.get as jest.Mock).mockReturnValue({ target });
+  await mail.showOriginalMessage();
+  expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith(
+    'mail-translation-status', expect.objectContaining({
+      type: 'insightMessage', message: '已显示原文。',
+      actions: [{ actionText: `将邮件翻译为：${label}`, actionType: 'showTaskPane', commandId: 'Translation.Options', contextData: JSON.stringify({ action: 'translateMessage' }) }],
+    }), expect.any(Function));
+});
+
+test('switches the same single-action notification back and forth with the displayed body', async () => {
+  const { item, setAsync } = setup();
+  const action = () => item.notificationMessages.replaceAsync.mock.calls.slice(-1)[0][1].actions;
+  await translateCurrentMessage('zh-Hans');
+  expect(action()).toEqual([expect.objectContaining({ actionText: '显示原文' })]);
+  await mail.showOriginalMessage();
+  expect(action()).toEqual([expect.objectContaining({ actionText: '将邮件翻译为：中文（简体）' })]);
+  await translateCurrentMessage('zh-Hans');
+  expect(action()).toEqual([expect.objectContaining({ actionText: '显示原文' })]);
+  expect(setAsync.mock.calls.map(call => call[0])).toEqual(['<p>你好</p>', '<p>Hello</p>', '<p>你好</p>']);
+  expect(item.notificationMessages.replaceAsync.mock.calls.every(call => call[0] === 'mail-translation-status')).toBe(true);
+});
+
+test.each(['callback', 'throw'])('falls back to pane translation after restoration when notification actions fail: %s', async failure => {
+  const { item } = setup();
+  item.notificationMessages.replaceAsync.mockImplementation((_key, value, cb) => {
+    if (value.actions && failure === 'throw') throw new Error('Unsupported notification action');
+    cb?.({ status: value.actions ? 'failed' : 'succeeded' });
+  });
+  await expect(mail.showOriginalMessage()).resolves.toBeUndefined();
+  expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith(
+    'mail-translation-status', expect.objectContaining({
+      type: 'info', message: '已显示原文。请打开“翻译选项”，点击“将邮件翻译为：中文（简体）”重新翻译。',
+    }), expect.any(Function));
+  expect(item.notificationMessages.replaceAsync.mock.calls.slice(-1)[0][1].actions).toBeUndefined();
+});
+
+test('does not offer translation when restoring the displayed body fails', async () => {
+  const { item, setAsync } = setup();
+  setAsync.mockImplementation((_html, _options, cb) => cb({ status: 'failed' }));
+  await expect(mail.showOriginalMessage()).rejects.toThrow('原文显示失败');
+  expect(item.notificationMessages.replaceAsync).not.toHaveBeenCalled();
+});
+
+test('does not update the notification if the item changes before restoration completes', async () => {
+  const { item, setAsync } = setup();
+  setAsync.mockImplementation((_html, _options, cb) => {
+    (Office.context.mailbox as any).item = { itemId: 'b' };
+    cb({ status: 'succeeded' });
+  });
+  await mail.showOriginalMessage();
+  expect(item.notificationMessages.replaceAsync).not.toHaveBeenCalled();
 });
 
 test('points to translation options when Outlook rejects notification actions', async () => {

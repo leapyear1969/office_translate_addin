@@ -1,4 +1,5 @@
 import { api, authenticate, Session } from './api';
+import { LANGUAGES, loadSettings } from './settings';
 import { getDisplayedBody } from '../commands/command-logic';
 
 export function currentItem(): Office.MessageRead | null {
@@ -45,7 +46,7 @@ export function notifyConsentRequired(item: Office.MessageRead): void {
 }
 const running = new Set<string | Office.MessageRead>();
 
-export async function showOriginalMessage(): Promise<void> {
+export async function showOriginalMessage(target?: string): Promise<void> {
   const item = currentItem();
   if (!item) throw new Error('请先选择一封邮件。');
   const displayed = getDisplayedBody(item);
@@ -57,22 +58,32 @@ export async function showOriginalMessage(): Promise<void> {
   if (!isCurrent(item)) throw new Error('邮件已切换，请在当前邮件上重新点击“显示原文”。');
   await officeCall<void>(callback => displayed.setAsync(html, { coercionType: Office.CoercionType.Html }, callback),
     '原文显示失败，请重试或重新打开邮件。', '显示原文超时：Outlook 正文显示接口未响应，请重新打开邮件查看原文。');
-  notify(item, '已显示原文。');
+  notifyOriginalDisplayed(item, target);
 }
 
-function notifyTranslationComplete(item: Office.MessageRead): void {
+function notifyMessageAction(item: Office.MessageRead, message: string, actionText: string,
+  action: 'showOriginal' | 'translateMessage', fallback: string): void {
   if (!isCurrent(item)) return;
-  item.notificationMessages.replaceAsync('mail-translation-status', {
-    type: Office.MailboxEnums.ItemNotificationMessageType.InsightMessage,
-    message: '翻译完成。',
-    icon: 'Icon.16',
-    actions: [{ actionText: '显示原文', actionType: 'showTaskPane', commandId: 'Translation.Options', contextData: JSON.stringify({ action: 'showOriginal' }) }],
-  }, result => {
-    // Some Outlook clients cannot show actionable notifications in read mode.
-    if (result.status !== Office.AsyncResultStatus.Succeeded) {
-      notify(item, '翻译完成。请打开“翻译选项”，点击“显示原文”恢复原文。');
-    }
-  });
+  try {
+    item.notificationMessages.replaceAsync('mail-translation-status', {
+      type: Office.MailboxEnums.ItemNotificationMessageType.InsightMessage,
+      message, icon: 'Icon.16',
+      actions: [{ actionText, actionType: 'showTaskPane', commandId: 'Translation.Options', contextData: JSON.stringify({ action }) }],
+    }, result => {
+      // Some Outlook clients cannot show actionable notifications in read mode.
+      if (result.status !== Office.AsyncResultStatus.Succeeded) notify(item, fallback);
+    });
+  } catch { notify(item, fallback); }
+}
+export function notifyOriginalDisplayed(item: Office.MessageRead, target?: string): void {
+  if (!isCurrent(item)) return;
+  const actionText = `将邮件翻译为：${LANGUAGES[target || loadSettings().target]}`;
+  notifyMessageAction(item, '已显示原文。', actionText, 'translateMessage',
+    `已显示原文。请打开“翻译选项”，点击“${actionText}”重新翻译。`);
+}
+function notifyTranslationComplete(item: Office.MessageRead): void {
+  notifyMessageAction(item, '翻译完成。', '显示原文', 'showOriginal',
+    '翻译完成。请打开“翻译选项”，点击“显示原文”恢复原文。');
 }
 export async function translateCurrentMessage(target: string, session?: Session, expectedItem?: Office.MessageRead): Promise<void> {
   const item = expectedItem || currentItem();

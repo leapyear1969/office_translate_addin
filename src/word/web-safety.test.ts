@@ -16,7 +16,7 @@ test.each(['<bad/>', '', '<!DOCTYPE x><x/>', '<broken'])('fails closed for inval
 test('enforces character, paragraph and byte limits', () => {
   expect(() => inspectWebOoxml(simplePackage(`<w:p><w:r><w:t>${'中'.repeat(WEB_LIMITS.characters + 1)}</w:t></w:r></w:p>`))).toThrow('20000');
   expect(() => inspectWebOoxml(simplePackage('<w:p/>'.repeat(501)))).toThrow('500');
-  expect(() => inspectWebOoxml('中'.repeat(666667))).toThrow('2 MB');
+  expect(() => inspectWebOoxml('中'.repeat(Math.floor(WEB_LIMITS.packageBytes / 3) + 1))).toThrow('5 MB');
 });
 test('rejects columns, section breaks and foreign namespace content', () => {
   for (const content of ['<w:sectPr><w:cols w:num="2"/></w:sectPr>', '<w:p><w:pPr><w:sectPr/></w:pPr></w:p>', '<w:p><math xmlns="urn:math"/></w:p>']) {

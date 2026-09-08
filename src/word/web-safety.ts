@@ -1,6 +1,6 @@
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG = 'http://schemas.microsoft.com/office/2006/xmlPackage';
-export const WEB_LIMITS = { characters: 20000, paragraphs: 500, packageBytes: 2000000 };
+export const WEB_LIMITS = { characters: 20000, paragraphs: 500, packageBytes: 5000000 };
 const guidance = '请先备份文档，再使用桌面 Word 客户端打开并翻译。';
 function blocked(reason: string): never {
   throw new Error(`网页版已停止翻译：${reason}。${guidance}`);
@@ -80,7 +80,7 @@ export function inspectWebOoxml(xml: string, options: { headerFooter?: boolean; 
   for (const char of xml) {
     const code = char.codePointAt(0)!;
     bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
-    if (bytes > WEB_LIMITS.packageBytes) blocked('文档结构数据超过 2 MB');
+    if (bytes > WEB_LIMITS.packageBytes) blocked('文档结构数据超过 5 MB');
   }
   if (!xml.trim() || /<!DOCTYPE/i.test(xml)) blocked('无法确认文档结构');
   const doc = new DOMParser().parseFromString(xml, 'application/xml');

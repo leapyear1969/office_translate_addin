@@ -1,0 +1,2 @@
+export const wordPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
+  `<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><pkg:part pkg:name="/word/document.xml"><pkg:xmlData><w:document><w:body>${content}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:cols w:num="2"/></w:sectPr></w:body></w:document></pkg:xmlData></pkg:part><pkg:part pkg:name="/word/media/image1.png"><pkg:binaryData>aW1hZ2U=</pkg:binaryData></pkg:part></pkg:package>`;

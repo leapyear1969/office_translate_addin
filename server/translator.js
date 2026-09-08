@@ -62,11 +62,12 @@ async function detectHtml(html, detect) {
 }
 
 function createTranslator(config) {
-  async function call(method, text, target) {
+  async function call(method, text, target, textType) {
     if (!config.translatorKey) throw Object.assign(new Error('请在 .env 中配置 TRANSLATOR_KEY。'), { status: 503 });
     const url = new URL(method, `${config.translatorEndpoint.replace(/\/$/, '')}/`);
     url.searchParams.set('api-version', '3.0');
     if (target) url.searchParams.set('to', target);
+    if (textType) url.searchParams.set('textType', textType);
     const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': config.translatorKey };
     if (config.translatorRegion) headers['Ocp-Apim-Subscription-Region'] = config.translatorRegion;
     const response = await fetch(url, {
@@ -82,6 +83,28 @@ function createTranslator(config) {
     return response.json();
   }
   return {
+    translateWord: async (paragraphs, to) => {
+      const translated = [];
+      const started = Date.now();
+      for (let offset = 0; offset < paragraphs.length;) {
+        if (Date.now() - started > 75000) throw new Error('全文翻译超时');
+        const batch = [];
+        let size = 0;
+        while (offset < paragraphs.length && batch.length < 100 && size + paragraphs[offset].length <= 45000) {
+          const paragraph = paragraphs[offset++];
+          size += paragraph.length;
+          batch.push(paragraph);
+        }
+        if (!batch.length) throw new Error('段落过长');
+        // Send entire paragraphs in HTML mode so formatting spans share context.
+        const response = await call('translate', batch, to, 'html');
+        const values = Array.isArray(response) ? response.map(item => item.translations?.[0]?.text) : [];
+        if (values.length !== batch.length || values.some(value => typeof value !== 'string' || !value.trim())) throw new Error('翻译结果不完整');
+        translated.push(...values);
+      }
+      if (translated.join('').length > 1000000) throw new Error('译文过长');
+      return translated;
+    },
     translate: (html, to) => translateHtml(html, to, async (texts, target) => {
       const response = await call('translate', texts, target);
       return Array.isArray(response) ? response.map(item => item.translations?.[0]?.text) : null;

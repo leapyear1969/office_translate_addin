@@ -1,11 +1,13 @@
+/** @jest-environment jsdom */
 import { translateDocument, restoreOriginalBody } from './document';
+import { wordPackage } from './test-fixtures/package';
 import { api, authenticate } from '../shared/api';
 import { rangeBackups, saveRangeBackups, TAG_PREFIX } from './backup';
 import { randomUUID } from 'crypto';
 jest.mock('../shared/api');
 
 function setup() {
-  (globalThis as any).crypto = { randomUUID };
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID } });
   const values = new Map<string, unknown>();
   const storage = {
     get: jest.fn((key: string) => values.get(key)),
@@ -21,6 +23,7 @@ function setup() {
       load: jest.fn(), getHtml: jest.fn(() => ({ value: range.html })),
       getOoxml: jest.fn(() => ({ value: range.ooxml })),
       insertHtml: jest.fn((html: string) => { range.html = html; range.text = '译文'; return range; }),
+      insertOoxml: jest.fn((xml: string) => { range.ooxml = xml; range.text = '译文'; return range; }),
       compareLocationWith: jest.fn(() => ({ value: range.relation })),
       insertContentControl: jest.fn(() => {
         const control: any = {
@@ -37,6 +40,7 @@ function setup() {
   };
   const paragraph = makeRange();
   const body = makeRange();
+  body.ooxml = wordPackage();
   const selection = makeRange();
   selection.paragraphs = { getFirst: () => ({ getRange: () => paragraph }) };
   const collection = { items: controls, load: jest.fn(), getByTag: (tag: string) => ({
@@ -48,17 +52,24 @@ function setup() {
   };
   (globalThis as any).Word = { run: (fn: Function) => fn(context), InsertLocation: { replace: 'Replace' } };
   jest.mocked(authenticate).mockResolvedValue({ token: 'token', user: {} as any });
-  jest.mocked(api).mockResolvedValue({ html: '<p>译文</p>' });
+  jest.mocked(api).mockImplementation(async (path) => (path === '/api/translate/word'
+    ? { paragraphs: ['<p><span id="r0">译文</span></p>'] }
+    : { html: '<p>译文</p>' }) as any);
   return { context, selection, paragraph, body, storage, controls };
 }
 
 test.each(['selection', 'paragraph', 'body'] as const)('backs up and translates only the %s range', async scope => {
   const ranges = setup();
-  ranges[scope].ooxml = `<${scope}/>`;
+  ranges[scope].ooxml = scope === 'body' ? wordPackage() : `<${scope}/>`;
+  const original = ranges[scope].ooxml;
   await translateDocument(scope, 'ja');
-  expect(rangeBackups()[0].originalOoxml).toBe(`<${scope}/>`);
+  expect(rangeBackups()[0].originalOoxml).toBe(original);
   expect(rangeBackups()[0].translatedText).toBe('译文');
-  expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+  if (scope === 'body') {
+    expect(ranges.body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining('译文'), 'Replace');
+    expect(ranges.body.getHtml).not.toHaveBeenCalled();
+    expect(ranges.body.insertHtml).not.toHaveBeenCalled();
+  } else expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
   expect(ranges.context.document.body.insertOoxml).not.toHaveBeenCalled();
   expect(ranges.context.trackedObjects.remove).toHaveBeenCalledWith(ranges[scope]);
 });
@@ -74,8 +85,8 @@ describe.each(['selection', 'paragraph', 'body'] as const)('%s translation with 
 
     expect(existing.getRange).not.toHaveBeenCalled();
     expect(existing.delete).not.toHaveBeenCalled();
-    expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
-    expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+    expect(scope === 'body' ? ranges.body.insertOoxml : ranges[scope].insertHtml).toHaveBeenCalled();
+    expect(rangeBackups()[0].originalOoxml).toBe(scope === 'body' ? wordPackage() : '<original/>');
   });
 });
 
@@ -88,7 +99,7 @@ test('untagged controls do not bypass overlap protection for translated content'
 
   await expect(translateDocument('body', 'ja')).rejects.toThrow('尚未恢复');
 
-  expect(body.insertHtml).toHaveBeenCalledTimes(1);
+  expect(body.insertOoxml).toHaveBeenCalledTimes(1);
   expect(untagged.delete).not.toHaveBeenCalled();
   expect(controls).toHaveLength(2);
 });
@@ -232,8 +243,8 @@ test.each(['selection', 'paragraph', 'body'] as const)('HTML export metadata cha
     cb({ status: 'succeeded' });
   });
   await translateDocument(scope, 'ja');
-  expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
-  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+  expect(scope === 'body' ? ranges.body.insertOoxml : ranges[scope].insertHtml).toHaveBeenCalled();
+  expect(rangeBackups()[0].originalOoxml).toBe(scope === 'body' ? wordPackage() : '<original/>');
   expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
 });
 
@@ -388,4 +399,45 @@ test('incomplete legacy wrapper is cleared once without repeated skipped warning
   expect(selection.text).toBe('Original');
   expect(rangeBackups()).toHaveLength(1);
   expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
+});
+
+test('full-body translation restores the exact original OOXML package', async () => {
+  const { body, controls } = setup();
+  const original = body.ooxml;
+  await translateDocument('body', 'zh-Hans');
+  expect(api).toHaveBeenCalledWith('/api/translate/word', 'token', {
+    paragraphs: ['<p><span id="r0">Original</span></p>'], to: 'zh-Hans',
+  });
+  const control = controls[0];
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
+  expect(control.insertOoxml).toHaveBeenCalledWith(original, 'Replace');
+  expect(body.ooxml).toBe(original);
+  expect(body.getHtml).not.toHaveBeenCalled();
+  expect(body.insertHtml).not.toHaveBeenCalled();
+});
+
+test.each(['export', 'malformed', 'response', 'backup', 'cancel', 'edit', 'insert'])('full-body %s failure never falls back to HTML', async failure => {
+  const { body, storage } = setup();
+  if (failure === 'export') body.getOoxml.mockImplementation(() => { throw new Error('ooxmlIsMalformed'); });
+  if (failure === 'malformed') body.ooxml = '<broken>';
+  if (failure === 'response') jest.mocked(api).mockResolvedValueOnce({ paragraphs: [] });
+  if (failure === 'backup') storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
+  if (failure === 'edit') storage.saveAsync.mockImplementationOnce(cb => { body.text = 'User edits'; cb({ status: 'succeeded' }); });
+  if (failure === 'insert') body.insertOoxml.mockImplementation(() => { throw new Error('ooxmlIsMalformed'); });
+  await expect(translateDocument('body', 'ja', () => failure !== 'cancel')).rejects.toThrow();
+  expect(body.getHtml).not.toHaveBeenCalled();
+  expect(body.insertHtml).not.toHaveBeenCalled();
+  if (failure !== 'insert') expect(body.insertOoxml).not.toHaveBeenCalled();
+  else expect(rangeBackups()[0].originalOoxml).toBe(wordPackage());
+});
+
+test('layout-only edits during full-body translation cancel replacement', async () => {
+  const { body, storage } = setup();
+  storage.saveAsync.mockImplementationOnce(cb => {
+    body.ooxml = body.ooxml.replace('11906', '15000');
+    cb({ status: 'succeeded' });
+  });
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('原文已更改');
+  expect(body.insertOoxml).not.toHaveBeenCalled();
+  expect(body.insertHtml).not.toHaveBeenCalled();
 });

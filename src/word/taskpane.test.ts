@@ -151,3 +151,11 @@ test('restoration reports skipped edits in the panel', async () => {
   expect(button('status').textContent).toContain('已恢复 1 处翻译；2 处');
   expect(button('status').textContent).toContain('已保留当前编辑');
 });
+
+test('full-body completion reports paragraphs retained for safety', async () => {
+  const { translateDocument } = await setup();
+  translateDocument.mockResolvedValueOnce({ htmlBackup: false, skippedParagraphs: 2 } as any);
+  button('translate-body').click(); await settle();
+  expect(button('status').textContent).toContain('2 个段落');
+  expect(button('status').textContent).toContain('已保留原文');
+});

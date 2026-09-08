@@ -41,7 +41,7 @@
     </section>
     <form id="preferences">
       <fieldset id="settings-fields" disabled>
-        <p class="hint">文档默认不翻译，选中需要的内容后点击翻译按钮，或主动选择翻译当前段落、正文全文。当前段落指光标所在段落或选区的第一个段落。译文替换原文，可使用 Word 撤销或恢复原文备份。目标语言设置随当前文档保存。</p>
+        <p class="hint">文档默认不翻译，选中需要的内容后点击翻译按钮，或主动选择翻译当前段落、正文全文。全文翻译保留 Word 原生结构，无法安全处理的段落保留原文并提示；译文长度变化仍可能影响换行和分页。当前段落指光标所在段落或选区的第一个段落。译文替换原文，可使用 Word 撤销或恢复原文备份。目标语言设置随当前文档保存。</p>
         <div class="target-row"><label for="target-language">将文档翻译为：</label><select id="target-language" name="target"></select></div>
         <div class="footer"><button class="primary" type="submit" id="save">保存设置</button><span id="save-status" role="status" aria-live="polite"></span></div>
       </fieldset>

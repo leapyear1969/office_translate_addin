@@ -1,4 +1,30 @@
-const { translateHtml, detectHtml } = require('./translator');
+const { translateHtml, detectHtml, createTranslator } = require('./translator');
+
+describe('Word paragraph translation', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; });
+  const service = () => createTranslator({ translatorKey: 'test', translatorEndpoint: 'https://translator.example/' });
+  test('sends entire mixed-format paragraphs in HTML mode and batches within limits', async () => {
+    const paragraph = '<p><span id="r0">Hello </span><span id="r1">world</span></p>';
+    const paragraphs = Array(102).fill(paragraph).concat(['<p>' + 'x'.repeat(39000) + '</p>', '<p>' + 'y'.repeat(39000) + '</p>']);
+    global.fetch = jest.fn(async (_url, options) => ({ ok: true,
+      json: async () => JSON.parse(options.body).map(({ Text }) => ({ translations: [{ text: Text }] })),
+    }));
+    expect(await service().translateWord(paragraphs, 'zh-Hans')).toEqual(paragraphs);
+    for (const [url, options] of global.fetch.mock.calls) {
+      expect(url.searchParams.get('textType')).toBe('html');
+      expect(url.searchParams.get('to')).toBe('zh-Hans');
+      const body = JSON.parse(options.body);
+      expect(body.length).toBeLessThanOrEqual(100);
+      expect(body.reduce((n, item) => n + item.Text.length, 0)).toBeLessThanOrEqual(45000);
+    }
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)[0].Text).toBe(paragraph);
+  });
+  test('rejects incomplete provider output rather than losing paragraphs', async () => {
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => [] }));
+    await expect(service().translateWord(['<p>Hello</p>'], 'en')).rejects.toThrow('不完整');
+  });
+});
 
 describe('mail HTML translation', () => {
   test('preserves spaces around inline formatting even if Translator trims them', async () => {

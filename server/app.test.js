@@ -2,21 +2,39 @@ const { createApp } = require('./app');
 const config = { origin: 'https://localhost:3000' };
 async function setup(run) {
   const translate = jest.fn(async () => '<p>译文</p>');
+  const translateWord = jest.fn(async paragraphs => paragraphs.map(p => p.replace('Hello', '你好')));
   const authenticate = jest.fn(async token => { if (token !== 'valid') throw new Error('invalid'); return { oid: 'user', tid: 'tenant' }; });
   const profile = jest.fn(async () => ({ id: 'user', displayName: 'Test', mail: 'test@example.com' }));
-  const app = createApp(config, { authenticate, profile, translate, detect: async () => ({ language: 'en', score: 1 }) });
+  const app = createApp(config, { authenticate, profile, translate, translateWord, detect: async () => ({ language: 'en', score: 1 }) });
   const server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   const request = (path, { body, token, origin } = {}) => fetch(`http://127.0.0.1:${server.address().port}${path}`, {
     method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(origin ? { Origin: origin } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  try { await run({ request, translate, profile }); }
+  try { await run({ request, translate, translateWord, profile }); }
   finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }
 test('requires SSO before submitting content to Translator', () => setup(async ({ request, translate }) => {
   const r = await request('/api/translate', { body: { html: '<p>Hello</p>', to: 'zh-Hans' } });
   expect(r.status).toBe(401);
   expect(translate).not.toHaveBeenCalled();
+}));
+
+test('Word paragraph endpoint preserves markers and requires authentication', () => setup(async ({ request, translateWord, translate }) => {
+  const body = { paragraphs: ['<p><span id="r0">Hello</span></p>'], to: 'zh-Hans' };
+  expect((await request('/api/translate/word', { body })).status).toBe(401);
+  expect(translateWord).not.toHaveBeenCalled();
+  const response = await request('/api/translate/word', { body, token: 'valid' });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ paragraphs: ['<p><span id="r0">你好</span></p>'] });
+  expect(translateWord).toHaveBeenCalledWith(body.paragraphs, body.to);
+  expect(translate).not.toHaveBeenCalled();
+}));
+
+test.each([null, [], [null], [''], ['x'.repeat(40001)], Array(26).fill('x'.repeat(40000))])('rejects invalid Word paragraph input (%#)', paragraphs => setup(async ({ request, translateWord }) => {
+  const response = await request('/api/translate/word', { token: 'valid', body: { paragraphs, to: 'en' } });
+  expect(response.status).toBe(400);
+  expect(translateWord).not.toHaveBeenCalled();
 }));
 test('translates authenticated requests and returns the Graph profile', () => setup(async ({ request }) => {
   const r = await request('/api/translate', { token: 'valid', body: { html: '<p>Hello</p>', to: 'zh-Hans' } });

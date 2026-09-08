@@ -49,6 +49,16 @@ function createApp(config, dependencies) {
     }
     res.json({ html: await services.translate(req.body.html, req.body.to) });
   }));
+  app.post('/api/translate/word', route(async (req, res) => {
+    const { paragraphs, to } = req.body || {};
+    if (!Array.isArray(paragraphs) || !paragraphs.length || paragraphs.length > 10000
+      || paragraphs.some(value => typeof value !== 'string' || !value.trim() || value.length > 40000)
+      || paragraphs.join('').length > 1000000
+      || typeof to !== 'string' || !/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(to)) {
+      return res.status(400).json({ error: '正文段落或目标语言无效，或内容超过限制。' });
+    }
+    res.json({ paragraphs: await services.translateWord(paragraphs, to) });
+  }));
   app.post('/api/detect', route(async (req, res) => {
     if (validateHtml(req, res)) res.json(await services.detect(req.body.html));
   }));

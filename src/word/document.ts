@@ -1,6 +1,7 @@
 import { api, authenticate } from '../shared/api';
 import { hasLegacyBackup, rangeBackups, saveRangeBackups, TAG_PREFIX, RangeBackup } from './backup';
 import { prepareOoxml, rebaseOoxml } from './ooxml';
+import { checkWebDocument } from './web-safety';
 
 export type Scope = 'selection' | 'paragraph' | 'body';
 let busy = false;
@@ -54,6 +55,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
       const range = rangeFor(context, scope);
       context.trackedObjects.add(range);
       try {
+        await checkWebDocument(context);
         range.load('text');
         // Full-body translation must never round-trip the document through HTML.
         const html = scope === 'body' ? undefined : range.getHtml();
@@ -83,6 +85,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
           translatedHtml = result.html;
         }
         if (!shouldContinue()) throw new Error('已取消翻译。');
+        await checkWebDocument(context);
         await ensureNoOverlap(context, range);
         const record: RangeBackup = { tag: TAG_PREFIX + crypto.randomUUID() };
         if (plan) {
@@ -112,6 +115,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         // Persist the original before any replacement. An interrupted operation
         // leaves a pending record, which restoration never applies blindly.
         await saveRangeBackups([...backups, record]);
+        await checkWebDocument(context);
         range.load('text');
         const currentOoxml = bodyOoxml ? range.getOoxml() : undefined;
         await context.sync();

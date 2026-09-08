@@ -4,6 +4,7 @@ import { requestConsent } from '../shared/consent';
 import { translateDocument, restoreOriginalBody, Scope } from './document';
 import { loadSettings, saveSettings, WordSettings } from './settings';
 import { LANGUAGES } from '../shared/settings';
+import { isWordOnline } from './web-safety';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const target = element<HTMLSelectElement>('target-language');
@@ -49,7 +50,7 @@ async function translateScope(scope: Scope, targetLanguage = settings.target) {
   translating = true;
   updateDocumentActions();
   element('restore-prompt').hidden = true;
-  status('正在翻译文档内容…');
+  status(isWordOnline() ? '正在检查文档是否适合网页版翻译…' : '正在翻译文档内容…');
   try {
     const result = await translateDocument(scope, targetLanguage, () => !signedOut);
     status((result?.htmlBackup
@@ -166,6 +167,7 @@ Office.actions.associate('translateSelectionChinese', async (event: Office.Addin
 
 Office.onReady(async info => {
   if (info.host !== Office.HostType.Word) return;
+  element('web-backup-notice').hidden = !isWordOnline();
   settings = loadSettings();
   target.value = settings.target;
   updateDocumentActions();

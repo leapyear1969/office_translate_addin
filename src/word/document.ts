@@ -12,8 +12,9 @@ function malformedOoxml(error: unknown): boolean {
 async function syncStep(context: Word.RequestContext, step: string): Promise<void> {
   try { await context.sync(); }
   catch (error) {
-    const failure = error as { code?: string; message?: string };
-    throw new Error(`${step}失败：${failure.code || failure.message || 'Word 未知错误'}。`);
+    const failure = error as { code?: string; message?: string; debugInfo?: { errorLocation?: string } };
+    const location = failure.debugInfo?.errorLocation;
+    throw new Error(`${step}失败：${failure.code || failure.message || 'Word 未知错误'}${location ? `（${location}）` : ''}。`);
   }
 }
 
@@ -27,7 +28,13 @@ async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range) 
   const controls = context.document.contentControls;
   controls.load('items/tag');
   await context.sync();
-  const relations = controls.items.filter(control => control.tag.startsWith(TAG_PREFIX))
+  // A failed operation can leave a wrapper without a committed checkpoint.
+  // Remove only its wrapper, never its current contents or saved original.
+  const pending = new Set(rangeBackups().filter(record => record.translatedText === undefined).map(record => record.tag));
+  const failed = controls.items.filter(control => pending.has(control.tag));
+  failed.forEach(control => control.delete(true));
+  if (failed.length) await syncStep(context, '清理未完成的翻译标记');
+  const relations = controls.items.filter(control => control.tag.startsWith(TAG_PREFIX) && !pending.has(control.tag))
     .map(control => range.compareLocationWith(control.getRange()));
   await context.sync();
   const separate = ['Before', 'After', 'AdjacentBefore', 'AdjacentAfter', 'Unrelated'];
@@ -83,12 +90,28 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         if (range.text !== originalText) {
           throw new Error('翻译期间原文已更改，已取消替换，请重试。');
         }
-        const control = range.insertContentControl();
-        control.tag = record.tag;
-        control.title = '翻译内容（原文已备份）';
-        await syncStep(context, '创建翻译范围标记');
-        control.insertHtml(result.html, Word.InsertLocation.replace);
+        // Let Word import the HTML before wrapping it. A control created from
+        // the original paragraph/selection can have incompatible boundaries.
+        // Use the returned range, not the selection (which may have moved).
+        const inserted = range.insertHtml(result.html, Word.InsertLocation.replace);
         await syncStep(context, '写入译文（原文备份已保留；如正文发生变化，请用 Word 撤销）');
+        let control: Word.ContentControl | undefined;
+        try {
+          control = inserted.insertContentControl();
+          await syncStep(context, '创建译文范围标记');
+          control.tag = record.tag;
+          control.title = '翻译内容（原文已备份）';
+          await syncStep(context, '设置译文范围标记');
+        } catch (error) {
+          // Host batches are not transactions: creation may have succeeded
+          // before a property write failed. Never delete the enclosed text.
+          let cleanup = '';
+          if (control) {
+            try { control.delete(true); await context.sync(); }
+            catch { cleanup = '标记清理也未完成。'; }
+          }
+          throw new Error(`${(error as Error).message}译文可能已写入，${cleanup}原文备份保留，请使用 Word 撤销本次操作。`);
+        }
         const translated = control.getRange('Content');
         translated.load('text');
         await syncStep(context, '读取译文校验信息');

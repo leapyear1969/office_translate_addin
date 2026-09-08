@@ -20,6 +20,7 @@ function setup() {
       text: 'Original', html: '<p>Original</p>', ooxml: '<original/>', relation: 'Before',
       load: jest.fn(), getHtml: jest.fn(() => ({ value: range.html })),
       getOoxml: jest.fn(() => ({ value: range.ooxml })),
+      insertHtml: jest.fn((html: string) => { range.html = html; range.text = '译文'; return range; }),
       compareLocationWith: jest.fn(() => ({ value: range.relation })),
       insertContentControl: jest.fn(() => {
         const control: any = {
@@ -57,7 +58,7 @@ test.each(['selection', 'paragraph', 'body'] as const)('backs up and translates 
   await translateDocument(scope, 'ja');
   expect(rangeBackups()[0].originalOoxml).toBe(`<${scope}/>`);
   expect(rangeBackups()[0].translatedText).toBe('译文');
-  expect(ranges.controls[0].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+  expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
   expect(ranges.context.document.body.insertOoxml).not.toHaveBeenCalled();
   expect(ranges.context.trackedObjects.remove).toHaveBeenCalledWith(ranges[scope]);
 });
@@ -199,7 +200,7 @@ test.each(['selection', 'paragraph', 'body'] as const)('HTML export metadata cha
     cb({ status: 'succeeded' });
   });
   await translateDocument(scope, 'ja');
-  expect(ranges.controls[0].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+  expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
   expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
   expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
 });
@@ -276,10 +277,10 @@ test('HTML fallback backup save failure still prevents translation', async () =>
 });
 
 test('OOXML error while inserting translation reports the write stage and does not fall back', async () => {
-  const { context, controls } = setup();
+  const { context, selection } = setup();
   let failed = false;
   context.sync.mockImplementation(async () => {
-    if (!failed && controls[0]?.insertHtml.mock.calls.length) {
+    if (!failed && selection.insertHtml.mock.calls.length) {
       failed = true;
       throw Object.assign(new Error('ooxmlIsMalformed'), { code: 'ooxmlIsMalformed' });
     }
@@ -288,4 +289,46 @@ test('OOXML error while inserting translation reports the write stage and does n
   expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
   expect(rangeBackups()[0].originalHtml).toBeUndefined();
   expect(rangeBackups()[0].translatedText).toBeUndefined();
+});
+
+test('wraps the returned inserted range after import, rather than the original paragraph', async () => {
+  const { paragraph, selection } = setup();
+  paragraph.insertHtml.mockImplementation(() => { selection.text = '译文'; return selection; });
+  paragraph.insertContentControl.mockImplementation(() => { throw new Error('Original boundary unsupported'); });
+  await translateDocument('paragraph', 'ja');
+  expect(paragraph.insertContentControl).not.toHaveBeenCalled();
+  expect(selection.insertContentControl).toHaveBeenCalledTimes(1);
+  expect(paragraph.insertHtml.mock.invocationCallOrder[0]).toBeLessThan(selection.insertContentControl.mock.invocationCallOrder[0]);
+});
+
+test('property failure removes the new wrapper only and reports the Word API location', async () => {
+  const { context, controls, selection } = setup();
+  let failedControl: any;
+  context.sync.mockImplementation(async () => {
+    if (!failedControl && controls[0]?.tag) {
+      failedControl = controls[0];
+      throw Object.assign(new Error('GeneralException'), {
+        code: 'GeneralException', debugInfo: { errorLocation: 'ContentControl.tag' },
+      });
+    }
+  });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('ContentControl.tag');
+  expect(failedControl.delete).toHaveBeenCalledWith(true);
+  expect(controls).toHaveLength(0);
+  expect(selection.text).toBe('译文');
+  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+});
+
+test('retry clears an old incomplete wrapper but leaves its text and backup intact', async () => {
+  const { selection, controls, body } = setup();
+  const old = selection.insertContentControl();
+  old.tag = TAG_PREFIX + 'incomplete';
+  await saveRangeBackups([{ tag: old.tag, originalOoxml: '<old/>' }]);
+  selection.relation = 'Equal';
+  body.text = 'Unrelated saved edits';
+  await translateDocument('selection', 'ja');
+  expect(old.delete).toHaveBeenCalledWith(true);
+  expect(controls).not.toContain(old);
+  expect(rangeBackups()[0].originalOoxml).toBe('<old/>');
+  expect(body.text).toBe('Unrelated saved edits');
 });

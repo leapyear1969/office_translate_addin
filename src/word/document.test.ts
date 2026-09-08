@@ -240,3 +240,52 @@ test('failed settings write preserves previous range backups', async () => {
   await expect(saveRangeBackups([])).rejects.toThrow('保存');
   expect(rangeBackups()).toEqual(original);
 });
+
+test.each(['ooxmlIsMalformed', 'ooxmlIsMalformated'])('OOXML export failure %s falls back to persisted range HTML', async code => {
+  const { selection, context, body, controls } = setup();
+  let exportPending = false;
+  selection.getOoxml.mockImplementation(() => { exportPending = true; return { value: '' }; });
+  context.sync.mockImplementation(async () => {
+    if (exportPending) { exportPending = false; throw Object.assign(new Error(code), { code }); }
+  });
+  expect(await translateDocument('selection', 'ja')).toEqual({ htmlBackup: true });
+  expect(rangeBackups()[0].originalHtml).toBe('<p>Original</p>');
+  expect(rangeBackups()[0].originalOoxml).toBeUndefined();
+  body.text = 'Later edits';
+  const control = controls[0];
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
+  expect(control.insertHtml).toHaveBeenLastCalledWith('<p>Original</p>', 'Replace');
+  expect(control.insertOoxml).not.toHaveBeenCalled();
+  expect(body.text).toBe('Later edits');
+});
+
+test('unrelated export failure does not silently downgrade the backup', async () => {
+  const { selection } = setup();
+  selection.getOoxml.mockImplementation(() => { throw new Error('AccessDenied'); });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('AccessDenied');
+  expect(selection.insertContentControl).not.toHaveBeenCalled();
+  expect(rangeBackups()).toEqual([]);
+});
+
+test('HTML fallback backup save failure still prevents translation', async () => {
+  const { selection, storage } = setup();
+  selection.getOoxml.mockImplementation(() => { throw new Error('ooxmlIsMalformed'); });
+  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('保存翻译范围备份失败');
+  expect(selection.insertContentControl).not.toHaveBeenCalled();
+});
+
+test('OOXML error while inserting translation reports the write stage and does not fall back', async () => {
+  const { context, controls } = setup();
+  let failed = false;
+  context.sync.mockImplementation(async () => {
+    if (!failed && controls[0]?.insertHtml.mock.calls.length) {
+      failed = true;
+      throw Object.assign(new Error('ooxmlIsMalformed'), { code: 'ooxmlIsMalformed' });
+    }
+  });
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('写入译文');
+  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+  expect(rangeBackups()[0].originalHtml).toBeUndefined();
+  expect(rangeBackups()[0].translatedText).toBeUndefined();
+});

@@ -4,7 +4,8 @@ export const TAG_PREFIX = 'wordTranslation:';
 
 export interface RangeBackup {
   tag: string;
-  originalOoxml: string;
+  originalOoxml?: string;
+  originalHtml?: string;
   // Missing until the translated content has been read back and persisted.
   translatedHtml?: string;
   translatedText?: string;
@@ -14,7 +15,11 @@ export function rangeBackups(): RangeBackup[] {
   const value: unknown = Office.context.document.settings.get(KEY);
   if (value == null) return [];
   if (!Array.isArray(value) || value.some(item => !item || typeof item.tag !== 'string'
-    || !item.tag.startsWith(TAG_PREFIX) || typeof item.originalOoxml !== 'string' || !item.originalOoxml.trim()
+    || !item.tag.startsWith(TAG_PREFIX)
+    || !((typeof item.originalOoxml === 'string' && item.originalOoxml.trim())
+      || (typeof item.originalHtml === 'string' && item.originalHtml.trim()))
+    || (item.originalOoxml !== undefined && typeof item.originalOoxml !== 'string')
+    || (item.originalHtml !== undefined && typeof item.originalHtml !== 'string')
     || (item.translatedHtml !== undefined && typeof item.translatedHtml !== 'string')
     || (item.translatedText !== undefined && typeof item.translatedText !== 'string'))
     || new Set(value.map(item => item.tag)).size !== value.length) {

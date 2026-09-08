@@ -51,8 +51,10 @@ async function translateScope(scope: Scope, targetLanguage = settings.target) {
   element('restore-prompt').hidden = true;
   status('正在翻译文档内容…');
   try {
-    await translateDocument(scope, targetLanguage, () => !signedOut);
-    status('翻译完成，原文备份已保留。保存文档后，重新打开也可恢复原文。');
+    const result = await translateDocument(scope, targetLanguage, () => !signedOut);
+    status(result?.htmlBackup
+      ? '翻译完成。Word 无法导出 OOXML，已使用 HTML 原文备份；可恢复文字及基本格式，复杂格式可能变化。请保存文档。'
+      : '翻译完成，原文备份已保留。保存文档后，重新打开也可恢复原文。');
   } catch (error) {
     status((error as Error).message, true);
     if ((error as { code?: string }).code === 'consent_required') {

@@ -4,6 +4,19 @@ import { hasLegacyBackup, rangeBackups, saveRangeBackups, TAG_PREFIX, RangeBacku
 export type Scope = 'selection' | 'paragraph' | 'body';
 let busy = false;
 
+function malformedOoxml(error: unknown): boolean {
+  const failure = error as { code?: string; message?: string };
+  return /ooxmlIsMalformed|ooxmlIsMalformated|InvalidOoxml/i.test(`${failure?.code || ''} ${failure?.message || ''}`);
+}
+
+async function syncStep(context: Word.RequestContext, step: string): Promise<void> {
+  try { await context.sync(); }
+  catch (error) {
+    const failure = error as { code?: string; message?: string };
+    throw new Error(`${step}失败：${failure.code || failure.message || 'Word 未知错误'}。`);
+  }
+}
+
 function rangeFor(context: Word.RequestContext, scope: Scope): Word.Range {
   if (scope === 'body') return context.document.body.getRange();
   const selection = context.document.getSelection();
@@ -23,17 +36,17 @@ async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range) 
   }
 }
 
-export async function translateDocument(scope: Scope, target: string, shouldContinue = () => true): Promise<void> {
+export async function translateDocument(scope: Scope, target: string, shouldContinue = () => true): Promise<{ htmlBackup: boolean }> {
   if (busy) throw new Error('文档操作正在进行，请稍后重试。');
   busy = true;
   try {
-    await Word.run(async context => {
+    return await Word.run(async context => {
       const range = rangeFor(context, scope);
       context.trackedObjects.add(range);
       try {
         range.load('text');
         const html = range.getHtml();
-        await context.sync();
+        await syncStep(context, '读取翻译范围');
         const originalText = range.text;
         if (!originalText.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
         if (html.value.length > 1000000) throw new Error('文档内容过长，请选择较小范围分次翻译。');
@@ -43,11 +56,21 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         if (typeof result.html !== 'string' || !result.html.trim() || result.html.length > 1000000) throw new Error('译文无效或超过显示限制。');
         if (!shouldContinue()) throw new Error('已取消翻译。');
         await ensureNoOverlap(context, range);
-        const original = range.getOoxml();
-        await context.sync();
-        if (!original.value.trim()) throw new Error('未能读取原文，已取消翻译。');
+        const record: RangeBackup = { tag: TAG_PREFIX + crypto.randomUUID() };
+        try {
+          const original = range.getOoxml();
+          await context.sync();
+          if (!original.value.trim()) throw new Error('未能读取原文，已取消翻译。');
+          record.originalOoxml = original.value;
+        } catch (error) {
+          if (!malformedOoxml(error)) throw error;
+          if (!html.value.trim()) throw new Error('Word 无法导出原文备份，已取消翻译。请保存并重新打开文档后重试。');
+          // Some Word web hosts cannot export OOXML after an edit. Retain
+          // the HTML captured from this exact tracked range before the request.
+          // Do not fall back on insert errors or overwrite without a backup.
+          record.originalHtml = html.value;
+        }
         const backups = rangeBackups();
-        const record: RangeBackup = { tag: TAG_PREFIX + crypto.randomUUID(), originalOoxml: original.value };
         // Persist the original before any replacement. An interrupted operation
         // leaves a pending record, which restoration never applies blindly.
         await saveRangeBackups([...backups, record]);
@@ -63,15 +86,18 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         const control = range.insertContentControl();
         control.tag = record.tag;
         control.title = '翻译内容（原文已备份）';
+        await syncStep(context, '创建翻译范围标记');
         control.insertHtml(result.html, Word.InsertLocation.replace);
+        await syncStep(context, '写入译文（原文备份已保留；如正文发生变化，请用 Word 撤销）');
         const translated = control.getRange('Content');
         translated.load('text');
-        await context.sync();
+        await syncStep(context, '读取译文校验信息');
         record.translatedText = translated.text;
         try { await saveRangeBackups([...backups, record]); }
         catch {
           throw new Error('译文已写入，但恢复校验信息保存失败。原文备份仍保留，请使用 Word 撤销本次翻译。');
         }
+        return { htmlBackup: record.originalHtml !== undefined };
       } finally {
         context.trackedObjects.remove(range);
         await context.sync();
@@ -112,7 +138,9 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
           result.skipped++;
           continue;
         }
-        control.insertOoxml(record.originalOoxml, Word.InsertLocation.replace);
+        if (record.originalOoxml) control.insertOoxml(record.originalOoxml, Word.InsertLocation.replace);
+        else control.insertHtml(record.originalHtml!, Word.InsertLocation.replace);
+        await syncStep(context, '恢复翻译范围原文');
         control.delete(true);
         await context.sync();
         result.restored++;

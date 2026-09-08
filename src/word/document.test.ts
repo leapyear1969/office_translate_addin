@@ -84,16 +84,9 @@ test('a selection change during authentication does not redirect the write', asy
   expect(body.insertHtml).not.toHaveBeenCalled();
 });
 
-test('rejects a stale automatic offer before sending content', async () => {
+test('cancellation prevents a pending translation from writing', async () => {
   const { body } = setup();
-  await expect(translateDocument('body', 'zh-Hans', '<p>Older</p>')).rejects.toThrow('文档已更改');
-  expect(api).not.toHaveBeenCalled();
-  expect(body.insertHtml).not.toHaveBeenCalled();
-});
-
-test('closing the pane cancels an automatic write', async () => {
-  const { body } = setup();
-  await expect(translateDocument('body', 'zh-Hans', '<p>Original</p>', () => false)).rejects.toThrow('取消自动翻译');
+  await expect(translateDocument('body', 'zh-Hans', () => false)).rejects.toThrow('取消翻译');
   expect(body.insertHtml).not.toHaveBeenCalled();
 });
 

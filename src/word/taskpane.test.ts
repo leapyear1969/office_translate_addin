@@ -11,11 +11,11 @@ async function setup(mode = 'never', excluded: string[] = []) {
   const restoreOriginalBody = jest.fn(async () => {});
   const api = jest.fn(async () => ({ language: 'en', score: 1 }));
   const authenticate = jest.fn(async () => ({ token: 'token', user: { displayName: 'User', mail: 'user@example.com' } }));
-  jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody, documentHtml: async () => '<p>Original</p>' }));
+  jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody }));
   jest.doMock('../shared/api', () => ({ api, authenticate }));
   const requestConsent = jest.fn(async () => 'https://example.com/auth');
   jest.doMock('../shared/consent', () => ({ requestConsent }));
-  let saved = { mode, target: 'ja', excluded };
+  let saved: unknown = { mode, target: 'ja', excluded };
   let ready: Function = () => {};
   const commands: Record<string, Function> = {};
   const saveAsync = jest.fn((cb: Function) => cb({ status: 'succeeded' }));
@@ -27,14 +27,14 @@ async function setup(mode = 'never', excluded: string[] = []) {
     context: { document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
   };
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
-  return { translateDocument, restoreOriginalBody, commands, api, saveAsync, authenticate, requestConsent };
+  return { translateDocument, restoreOriginalBody, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
 
-test('manual scopes use saved language even when automatic translation is disabled', async () => {
+test('manual scopes use saved language without detecting document language', async () => {
   const { translateDocument, api } = await setup();
   for (const scope of ['selection', 'paragraph', 'body']) {
     button(`translate-${scope}`).click(); await settle();
-    expect(translateDocument).toHaveBeenLastCalledWith(scope, 'ja', undefined, expect.any(Function));
+    expect(translateDocument).toHaveBeenLastCalledWith(scope, 'ja', expect.any(Function));
   }
   expect(api).not.toHaveBeenCalled();
   expect(document.body.textContent).not.toMatch(/Outlook|邮件|显示原文/);
@@ -45,24 +45,27 @@ test('repeated context commands translate to Chinese and always complete the eve
   const event = { completed: jest.fn() };
   await commands.translateSelectionChinese(event); await commands.translateSelectionChinese(event);
   expect(translateDocument).toHaveBeenCalledTimes(2);
-  expect(translateDocument).toHaveBeenCalledWith('selection', 'zh-Hans', undefined, expect.any(Function));
+  expect(translateDocument).toHaveBeenCalledWith('selection', 'zh-Hans', expect.any(Function));
   expect(event.completed).toHaveBeenCalledTimes(2);
 });
 
-test('ask mode waits for acceptance and excluded languages never prompt', async () => {
-  const first = await setup('ask');
-  expect(button('translation-prompt').hidden).toBe(false);
-  expect(first.translateDocument).not.toHaveBeenCalled();
-  button('translate-now').click(); await settle();
-  expect(first.translateDocument).toHaveBeenCalledWith('body', 'ja', '<p>Original</p>', expect.any(Function));
-  const second = await setup('ask', ['en']);
-  expect(button('translation-prompt').hidden).toBe(true);
-  expect(second.translateDocument).not.toHaveBeenCalled();
-});
-
-test('always mode translates the detected body', async () => {
-  const { translateDocument } = await setup('always');
-  expect(translateDocument).toHaveBeenCalledWith('body', 'ja', '<p>Original</p>', expect.any(Function));
+test.each(['always', 'ask', 'never'])('legacy %s settings never detect, prompt or translate without a manual action', async mode => {
+  const { translateDocument, api, savedSettings } = await setup(mode, ['en']);
+  const visibility = (Office.addin.onVisibilityModeChanged as jest.Mock).mock.calls[0][0];
+  visibility({ visibilityMode: 'Hidden' });
+  visibility({ visibilityMode: 'Taskpane' });
+  button('signin').click(); await settle();
+  const target = document.getElementById('target-language') as HTMLSelectElement;
+  target.value = 'en'; target.dispatchEvent(new Event('change', { bubbles: true }));
+  button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
+  expect(savedSettings()).toEqual({ target: 'en' });
+  expect(api).not.toHaveBeenCalled();
+  expect(translateDocument).not.toHaveBeenCalled();
+  expect(document.querySelector('input[name=mode]')).toBeNull();
+  expect(document.getElementById('excluded-languages')).toBeNull();
+  expect(document.getElementById('translation-prompt')).toBeNull();
+  button('translate-selection').click(); await settle();
+  expect(translateDocument).toHaveBeenCalledWith('selection', 'en', expect.any(Function));
 });
 
 test('failed settings save keeps the previous target and allows retry', async () => {
@@ -73,10 +76,10 @@ test('failed settings save keeps the previous target and allows retry', async ()
   button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
   expect(button('save-status').textContent).toContain('保存设置失败');
   button('translate-selection').click(); await settle();
-  expect(translateDocument).toHaveBeenLastCalledWith('selection', 'ja', undefined, expect.any(Function));
+  expect(translateDocument).toHaveBeenLastCalledWith('selection', 'ja', expect.any(Function));
   button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
   button('translate-selection').click(); await settle();
-  expect(translateDocument).toHaveBeenLastCalledWith('selection', 'en', undefined, expect.any(Function));
+  expect(translateDocument).toHaveBeenLastCalledWith('selection', 'en', expect.any(Function));
 });
 
 test('explicit consent retains the browser authorization flow', async () => {

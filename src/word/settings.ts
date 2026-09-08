@@ -1,11 +1,17 @@
-import { normalizeSettings, Settings } from '../shared/settings';
+import { LANGUAGES } from '../shared/settings';
+
+export interface WordSettings { target: string }
+function normalizeSettings(input: unknown): WordSettings {
+  const value = (input || {}) as Partial<WordSettings>;
+  return { target: value.target && Object.hasOwnProperty.call(LANGUAGES, value.target) ? value.target : 'zh-Hans' };
+}
 
 const KEY = 'wordTranslation.preferences.v1';
 // Document settings are supported by Word and persist with this document.
-export function loadSettings(): Settings {
+export function loadSettings(): WordSettings {
   return normalizeSettings(Office.context.document.settings.get(KEY));
 }
-export function saveSettings(value: Settings): Promise<void> {
+export function saveSettings(value: WordSettings): Promise<void> {
   const storage = Office.context.document.settings;
   const previous = storage.get(KEY);
   storage.set(KEY, normalizeSettings(value));

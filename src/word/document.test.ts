@@ -39,17 +39,23 @@ test('rejects an empty selection without authentication or a write', async () =>
   expect(selection.insertHtml).not.toHaveBeenCalled();
 });
 
-test.each(['<p>Edited</p>', '<p><b>Original</b></p>'])('does not overwrite changed translation HTML: %s', async html => {
-  const { selection } = setup();
-  selection.getHtml.mockReturnValueOnce({ value: '<p>Original</p>' }).mockReturnValueOnce({ value: html });
-  await expect(translateDocument('selection', 'zh-Hans')).rejects.toThrow('原文已更改');
-  expect(selection.insertHtml).not.toHaveBeenCalled();
+test.each(['selection', 'paragraph', 'body'] as const)('export serialization changes do not block unchanged %s text', async scope => {
+  const ranges = setup();
+  const range = ranges[scope];
+  range.getHtml.mockReturnValueOnce({ value: '<p id="export-1">Original</p>' });
+  jest.mocked(api).mockImplementationOnce(async () => {
+    range.getHtml.mockReturnValue({ value: '<p id="export-2"><span>Original</span></p>' });
+    return { html: '<p>译文</p>' } as any;
+  });
+  await translateDocument(scope, 'zh-Hans');
+  expect(range.insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+  expect(range.getHtml).toHaveBeenCalledTimes(1);
 });
 
-test('reloads text before replacing even when exported HTML is unchanged', async () => {
+test.each(['Edited', '', 'Original ', 'original'])('reloads text and rejects edits even when HTML is unchanged: %j', async edited => {
   const { selection, context } = setup();
   context.sync.mockImplementation(async () => {
-    if (selection.getHtml.mock.calls.length === 2) selection.text = 'Edited';
+    if (selection.load.mock.calls.length === 2) selection.text = edited;
   });
   await expect(translateDocument('selection', 'zh-Hans')).rejects.toThrow('原文已更改');
   expect(selection.load).toHaveBeenCalledTimes(2);
@@ -131,7 +137,7 @@ test('backup save failure prevents replacement and allows retry', async () => {
 test('edits during backup persistence prevent translation from overwriting the selection', async () => {
   const { storage, selection } = setup();
   storage.saveAsync.mockImplementationOnce(cb => {
-    selection.getHtml.mockReturnValue({ value: '<p>Edited</p>' });
+    selection.text = 'Edited';
     cb({ status: 'succeeded' });
   });
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('原文已更改');

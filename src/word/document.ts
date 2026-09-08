@@ -27,7 +27,6 @@ export async function translateDocument(scope: Scope, target: string, expectedHt
       const html = range.getHtml();
       await context.sync();
       const originalText = range.text;
-      const originalHtml = html.value;
       if (!range.text.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
       if (html.value.length > 1000000) throw new Error('文档内容过长，请选择较小范围分次翻译。');
       if (expectedHtml !== undefined && html.value !== expectedHtml) throw new Error('文档已更改，请重新点击翻译正文全文。');
@@ -40,15 +39,14 @@ export async function translateDocument(scope: Scope, target: string, expectedHt
         await context.sync();
         await saveOriginalBody(body.value);
       }
-      // Compare the translation input, not the whole OOXML package: package
-      // metadata (including persisted add-in settings) is not a content revision.
-      // Use the same tracked range and host for both HTML snapshots. This also
-      // detects formatting changes represented by the HTML sent for translation.
+      // HTML/OOXML exports are serialization results, not revision tokens.
+      // Compare freshly loaded text on the tracked range instead. Keep exact
+      // whitespace so deletions and spacing edits also cancel the replacement.
+      // Formatting-only edits are not detected by this text conflict check.
       range.load('text');
-      const current = range.getHtml();
       await context.sync();
       if (!shouldContinue()) throw new Error('已取消自动翻译。');
-      if (range.text !== originalText || current.value !== originalHtml) throw new Error('翻译期间原文已更改，已取消替换，请重试。');
+      if (range.text !== originalText) throw new Error('翻译期间原文已更改，已取消替换，请重试。');
       range.insertHtml(result.html, Word.InsertLocation.replace);
       await context.sync();
     } finally {

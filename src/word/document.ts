@@ -52,11 +52,13 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         // leaves a pending record, which restoration never applies blindly.
         await saveRangeBackups([...backups, record]);
         range.load('text');
-        const currentHtml = range.getHtml();
         await context.sync();
         if (!shouldContinue()) throw new Error('已取消翻译。');
-        if (range.text !== originalText || currentHtml.value !== html.value) {
-          throw new Error('翻译期间原文或格式已更改，已取消替换，请重试。');
+        // HTML exports are serialization results, not revision tokens. Word
+        // can change export metadata when settings are saved. Compare exact
+        // text here; formatting-only edits during the request aren't detected.
+        if (range.text !== originalText) {
+          throw new Error('翻译期间原文已更改，已取消替换，请重试。');
         }
         const control = range.insertContentControl();
         control.tag = record.tag;

@@ -163,11 +163,24 @@ test('checkpoint failure retains original and skips uncertain translation on res
   expect(controls[0].insertOoxml).not.toHaveBeenCalled();
 });
 
-test.each(['text', 'html'])('edits to %s during backup persistence cancel replacement', async field => {
+test.each(['Edited', '', 'Original ', 'original'])('text edits during backup persistence cancel replacement: %j', async edited => {
   const { storage, selection } = setup();
-  storage.saveAsync.mockImplementationOnce(cb => { selection[field] = 'Edited'; cb({ status: 'succeeded' }); });
+  storage.saveAsync.mockImplementationOnce(cb => { selection.text = edited; cb({ status: 'succeeded' }); });
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('已更改');
   expect(selection.insertContentControl).not.toHaveBeenCalled();
+});
+
+test.each(['selection', 'paragraph', 'body'] as const)('HTML export metadata changes during backup save do not block %s translation', async scope => {
+  const ranges = setup();
+  ranges[scope].html = '<p id="export-1">Original</p>';
+  ranges.storage.saveAsync.mockImplementationOnce(cb => {
+    ranges[scope].html = '<p id="export-2"><span>Original</span></p>';
+    cb({ status: 'succeeded' });
+  });
+  await translateDocument(scope, 'ja');
+  expect(ranges.controls[0].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+  expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
 });
 
 test('selection changes during authentication do not redirect translation', async () => {

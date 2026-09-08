@@ -13,9 +13,11 @@ function setupWeb() {
   (Office as any).PlatformType = { OfficeOnline: 'OfficeOnline' };
   (Office.context as any).platform = 'OfficeOnline';
   ranges.body.ooxml = webPackage();
-  const extra = { text: '', load: jest.fn(), getOoxml: () => ({ value: webPackage('<w:p/>') }) };
+  const tables = { items: [] as { isUniform: boolean; nestingLevel: number }[], load: jest.fn() };
+  const extra = { text: '', load: jest.fn(), getOoxml: () => ({ value: webPackage('<w:p/>') }), tables: { items: [] as typeof tables.items, load: jest.fn() } };
+  (ranges.context.document.body as any).tables = tables;
   (ranges.context.document as any).sections = { load: jest.fn(), items: [{ getHeader: () => extra, getFooter: () => extra }] };
-  return { ...ranges, extra };
+  return { ...ranges, extra, tables };
 }
 
 test.each(['selection', 'paragraph', 'body'] as const)('web %s checks the whole document before requesting translation', async scope => {
@@ -27,12 +29,57 @@ test.each(['selection', 'paragraph', 'body'] as const)('web %s checks the whole 
   expect(ranges[scope].insertHtml).not.toHaveBeenCalled();
   expect(ranges[scope].insertOoxml).not.toHaveBeenCalled();
 });
-test('web allows simple documents and rejects header content', async () => {
+test('web allows simple documents and ordinary header content', async () => {
   const ranges = setupWeb();
-  ranges.extra.text = 'Header';
-  await expect(translateDocument('body', 'ja')).rejects.toThrow('页眉');
-  ranges.extra.text = '';
+  ranges.extra.getOoxml = () => ({ value: webPackage('<w:p><w:r><w:t>Header</w:t></w:r></w:p>') });
   await expect(translateDocument('body', 'ja')).resolves.toEqual({ htmlBackup: false });
+});
+test('web permits empty header parts and references only after checking all header ranges', async () => {
+  const ranges = setupWeb();
+  ranges.body.ooxml = webPackage().replace('<w:sectPr>', '<w:sectPr><w:headerReference/>')
+    .replace('</pkg:package>', '<pkg:part pkg:name="/word/header.xml"><pkg:xmlData><w:hdr><w:p/></w:hdr></pkg:xmlData></pkg:part></pkg:package>');
+  await expect(translateDocument('selection', 'ja')).resolves.toEqual({ htmlBackup: false });
+});
+test('web allows empty header tables', async () => {
+  const ranges = setupWeb();
+  ranges.extra.getOoxml = () => ({ value: webPackage('<w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>') });
+  ranges.extra.tables.items.push({ isUniform: true, nestingLevel: 1 });
+  await expect(translateDocument('selection', 'ja')).resolves.toEqual({ htmlBackup: false });
+});
+
+test.each(['body', 'header'] as const)('quick scan rejects complex %s tables before exporting or translating', async location => {
+  const ranges = setupWeb();
+  (location === 'body' ? ranges.tables : ranges.extra.tables).items.push({ isUniform: false, nestingLevel: 1 });
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('行列不一致');
+  expect(ranges.body.getOoxml).not.toHaveBeenCalled();
+  expect(api).not.toHaveBeenCalled();
+});
+test('quick scan rejects nesting and does not treat a scan failure as safe', async () => {
+  const ranges = setupWeb();
+  ranges.tables.items.push({ isUniform: true, nestingLevel: 2 });
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('嵌套');
+  ranges.tables.load.mockImplementation(() => { throw new Error('Host failure'); });
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('兼容性检查');
+  expect(api).not.toHaveBeenCalled();
+});
+test('uniform tables still undergo OOXML merge checks', async () => {
+  const ranges = setupWeb();
+  ranges.tables.items.push({ isUniform: true, nestingLevel: 1 });
+  ranges.body.ooxml = webPackage('<w:tbl><w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p/></w:tc></w:tr></w:tbl>');
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('合并');
+  expect(api).not.toHaveBeenCalled();
+});
+test('full body translation preserves an ordinary table and translates its cell', async () => {
+  const ranges = setupWeb();
+  ranges.tables.items.push({ isUniform: true, nestingLevel: 1 });
+  ranges.body.ooxml = webPackage('<w:tbl><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>Original</w:t></w:r></w:p></w:tc></w:tr></w:tbl>');
+  await translateDocument('body', 'ja');
+  const written = ranges.body.insertOoxml.mock.calls[0][0];
+  expect(written).toContain('<w:tbl>');
+  expect(written).toContain('<w:gridCol w:w="2000"/>');
+  expect(written).toContain('译文');
+  await restoreOriginalBody();
+  expect(ranges.body.text).toBe('Original');
 });
 test('web export failure does not fall back to HTML', async () => {
   const ranges = setupWeb();

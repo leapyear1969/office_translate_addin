@@ -63,6 +63,36 @@ test.each(['selection', 'paragraph', 'body'] as const)('backs up and translates 
   expect(ranges.context.trackedObjects.remove).toHaveBeenCalledWith(ranges[scope]);
 });
 
+describe.each(['selection', 'paragraph', 'body'] as const)('%s translation with existing document controls', scope => {
+  test.each([null, undefined, '', 'template-control'])('ignores unrelated control tag %j', async tag => {
+    const ranges = setup();
+    const existing = ranges[scope].insertContentControl();
+    existing.tag = tag;
+    ranges[scope].relation = 'Equal';
+
+    await expect(translateDocument(scope, 'ja')).resolves.toEqual({ htmlBackup: false });
+
+    expect(existing.getRange).not.toHaveBeenCalled();
+    expect(existing.delete).not.toHaveBeenCalled();
+    expect(ranges[scope].insertHtml).toHaveBeenCalledWith('<p>译文</p>', 'Replace');
+    expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+  });
+});
+
+test('untagged controls do not bypass overlap protection for translated content', async () => {
+  const { body, controls } = setup();
+  const untagged = body.insertContentControl();
+  untagged.tag = null;
+  await translateDocument('body', 'ja');
+  body.relation = 'Contains';
+
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('尚未恢复');
+
+  expect(body.insertHtml).toHaveBeenCalledTimes(1);
+  expect(untagged.delete).not.toHaveBeenCalled();
+  expect(controls).toHaveLength(2);
+});
+
 test('restores translation while preserving edits in other ranges, without authentication', async () => {
   const { selection, body, controls } = setup();
   await translateDocument('selection', 'ja');

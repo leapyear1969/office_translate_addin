@@ -34,7 +34,9 @@ async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range) 
   const failed = controls.items.filter(control => pending.has(control.tag));
   failed.forEach(control => control.delete(true));
   if (failed.length) await syncStep(context, '清理未完成的翻译标记');
-  const relations = controls.items.filter(control => control.tag.startsWith(TAG_PREFIX) && !pending.has(control.tag))
+  // Existing document/template controls can have a null tag at runtime.
+  const relations = controls.items.filter(control => typeof control.tag === 'string'
+    && control.tag.startsWith(TAG_PREFIX) && !pending.has(control.tag))
     .map(control => range.compareLocationWith(control.getRange()));
   await context.sync();
   const separate = ['Before', 'After', 'AdjacentBefore', 'AdjacentAfter', 'Unrelated'];

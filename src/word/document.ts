@@ -1,4 +1,5 @@
 import { api, authenticate } from '../shared/api';
+import { originalBody, saveOriginalBody } from './backup';
 
 export type Scope = 'selection' | 'paragraph' | 'body';
 
@@ -24,23 +25,44 @@ export async function translateDocument(scope: Scope, target: string, expectedHt
     try {
       range.load('text');
       const html = range.getHtml();
-      const original = range.getOoxml();
       await context.sync();
+      const originalText = range.text;
+      const originalHtml = html.value;
       if (!range.text.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
       if (html.value.length > 1000000) throw new Error('文档内容过长，请选择较小范围分次翻译。');
       if (expectedHtml !== undefined && html.value !== expectedHtml) throw new Error('文档已更改，请重新点击翻译正文全文。');
       const session = await authenticate();
       const result = await api<{ html: string }>('/api/translate', session.token, { html: html.value, to: target });
       if (typeof result.html !== 'string' || !result.html.trim() || result.html.length > 1000000) throw new Error('译文无效或超过显示限制。');
-      const current = range.getOoxml();
+      if (!shouldContinue()) throw new Error('已取消自动翻译。');
+      if (originalBody() === undefined) {
+        const body = context.document.body.getRange().getOoxml();
+        await context.sync();
+        await saveOriginalBody(body.value);
+      }
+      // Compare the translation input, not the whole OOXML package: package
+      // metadata (including persisted add-in settings) is not a content revision.
+      // Use the same tracked range and host for both HTML snapshots. This also
+      // detects formatting changes represented by the HTML sent for translation.
+      range.load('text');
+      const current = range.getHtml();
       await context.sync();
       if (!shouldContinue()) throw new Error('已取消自动翻译。');
-      if (current.value !== original.value) throw new Error('翻译期间原文已更改，已取消替换，请重试。');
+      if (range.text !== originalText || current.value !== originalHtml) throw new Error('翻译期间原文已更改，已取消替换，请重试。');
       range.insertHtml(result.html, Word.InsertLocation.replace);
       await context.sync();
     } finally {
       context.trackedObjects.remove(range);
       await context.sync();
     }
+  });
+}
+
+export async function restoreOriginalBody(): Promise<void> {
+  const backup = originalBody();
+  if (backup === undefined) throw new Error('当前文档没有保存的原文备份。');
+  await Word.run(async context => {
+    context.document.body.insertOoxml(backup, Word.InsertLocation.replace);
+    await context.sync();
   });
 }

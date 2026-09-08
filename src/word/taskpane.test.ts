@@ -8,9 +8,10 @@ async function setup(mode = 'never', excluded: string[] = []) {
   jest.resetModules();
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'taskpane.html'), 'utf8');
   const translateDocument = jest.fn(async (..._args: any[]) => {});
+  const restoreOriginalBody = jest.fn(async () => {});
   const api = jest.fn(async () => ({ language: 'en', score: 1 }));
   const authenticate = jest.fn(async () => ({ token: 'token', user: { displayName: 'User', mail: 'user@example.com' } }));
-  jest.doMock('./document', () => ({ translateDocument, documentHtml: async () => '<p>Original</p>' }));
+  jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody, documentHtml: async () => '<p>Original</p>' }));
   jest.doMock('../shared/api', () => ({ api, authenticate }));
   const requestConsent = jest.fn(async () => 'https://example.com/auth');
   jest.doMock('../shared/consent', () => ({ requestConsent }));
@@ -26,7 +27,7 @@ async function setup(mode = 'never', excluded: string[] = []) {
     context: { document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
   };
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
-  return { translateDocument, commands, api, saveAsync, authenticate, requestConsent };
+  return { translateDocument, restoreOriginalBody, commands, api, saveAsync, authenticate, requestConsent };
 }
 
 test('manual scopes use saved language even when automatic translation is disabled', async () => {
@@ -84,4 +85,30 @@ test('explicit consent retains the browser authorization flow', async () => {
   button('signin').click(); await settle();
   expect(requestConsent).toHaveBeenCalledWith('sso');
   expect(button('browser-consent').hidden).toBe(false);
+});
+
+test('restoration requires explicit confirmation and does not authenticate or translate again', async () => {
+  const { restoreOriginalBody, translateDocument, authenticate } = await setup('always');
+  translateDocument.mockClear(); authenticate.mockClear();
+  button('restore-original').click(); await settle();
+  expect(button('restore-prompt').hidden).toBe(false);
+  expect(restoreOriginalBody).not.toHaveBeenCalled();
+  button('cancel-restore').click(); await settle();
+  expect(button('restore-prompt').hidden).toBe(true);
+  expect(restoreOriginalBody).not.toHaveBeenCalled();
+  button('restore-original').click(); button('confirm-restore').click(); await settle();
+  expect(restoreOriginalBody).toHaveBeenCalledTimes(1);
+  expect(authenticate).not.toHaveBeenCalled();
+  expect(translateDocument).not.toHaveBeenCalled();
+  expect(button('status').textContent).toContain('已恢复首次翻译前的正文');
+});
+
+test('failed restoration reports an error and permits retry', async () => {
+  const { restoreOriginalBody } = await setup();
+  restoreOriginalBody.mockRejectedValueOnce(new Error('恢复失败'));
+  button('restore-original').click(); button('confirm-restore').click(); await settle();
+  expect(button('status').textContent).toBe('恢复失败');
+  expect(button('restore-original').disabled).toBe(false);
+  button('restore-original').click(); button('confirm-restore').click(); await settle();
+  expect(restoreOriginalBody).toHaveBeenCalledTimes(2);
 });

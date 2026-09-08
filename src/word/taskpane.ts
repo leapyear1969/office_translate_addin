@@ -1,6 +1,6 @@
 import { api, authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
-import { documentHtml, translateDocument, Scope } from './document';
+import { documentHtml, translateDocument, restoreOriginalBody, Scope } from './document';
 import { loadSettings, saveSettings } from './settings';
 import { LANGUAGES, Settings, shouldOfferTranslation } from '../shared/settings';
 
@@ -20,7 +20,7 @@ let visible = false;
 let initialized = false;
 let suppressAutomatic = false;
 function updateDocumentActions() {
-  ['translate-selection', 'translate-paragraph', 'translate-body', 'translate-now'].forEach(id => {
+  ['translate-selection', 'translate-paragraph', 'translate-body', 'translate-now', 'restore-original', 'confirm-restore'].forEach(id => {
     element<HTMLButtonElement>(id).disabled = translating;
   });
 }
@@ -68,10 +68,11 @@ async function translateScope(scope: Scope, targetLanguage = settings.target, ex
   translating = true;
   updateDocumentActions();
   element('translation-prompt').hidden = true;
+  element('restore-prompt').hidden = true;
   status('正在翻译文档内容…');
   try {
     await translateDocument(scope, targetLanguage, expectedHtml, () => expectedHtml === undefined || (visible && epoch === actionEpoch));
-    status('翻译完成。可使用 Word 的撤销功能恢复原文。');
+    status('翻译完成，原文备份已保留。保存文档后，重新打开也可恢复原文。');
   } catch (error) {
     status((error as Error).message, true);
     if ((error as { code?: string }).code === 'consent_required') {
@@ -123,6 +124,28 @@ async function signIn(interactive: boolean) {
 }
 
 fillLanguages(target); fillLanguages(picker); target.value = 'zh-Hans';
+element('restore-original').addEventListener('click', () => {
+  ++epoch;
+  suppressAutomatic = true;
+  offeredHtml = undefined;
+  element('translation-prompt').hidden = true;
+  element('restore-prompt').hidden = false;
+});
+element('cancel-restore').addEventListener('click', () => { element('restore-prompt').hidden = true; });
+element('confirm-restore').addEventListener('click', async () => {
+  if (translating || authorizing) return;
+  ++epoch;
+  suppressAutomatic = true;
+  translating = true;
+  updateDocumentActions();
+  element('restore-prompt').hidden = true;
+  status('正在恢复原文…');
+  try {
+    await restoreOriginalBody();
+    status('已恢复首次翻译前的正文，原文备份继续保留。请保存文档。');
+  } catch (error) { status((error as Error).message, true); }
+  finally { translating = false; updateDocumentActions(); }
+});
 element('signin').addEventListener('click', () => void signIn(true));
 element('preferences').addEventListener('change', event => {
   if (event.target !== excluded && event.target !== picker) markDirty();

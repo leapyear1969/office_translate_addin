@@ -27,7 +27,12 @@ module.exports = async (env = {}, argv) => {
         {
           test: /\.ts$/,
           exclude: /node_modules/,
-          use: "ts-loader",
+          use: {
+            loader: "ts-loader",
+            options: {
+              configFile: "tsconfig.build.json",
+            },
+          },
         },
       ],
     },

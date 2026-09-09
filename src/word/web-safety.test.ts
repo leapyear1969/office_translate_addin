@@ -1,6 +1,23 @@
 /** @jest-environment jsdom */
 import { inspectWebOoxml, WEB_LIMITS } from './web-safety';
 import { picture, withPictureParts } from './test-fixtures/pictures';
+import { listParagraph, withNumbering } from './test-fixtures/lists';
+
+test('allows numbered, multilevel and bullet lists in body, tables and headers/footers', () => {
+  const lists = listParagraph() + listParagraph(1, 1) + listParagraph(2) + listParagraph(3);
+  for (const content of [lists, `<w:tbl><w:tr><w:tc>${lists}</w:tc></w:tr></w:tbl>`]) {
+    expect(() => inspectWebOoxml(withNumbering(simplePackage(content)))).not.toThrow();
+    expect(() => inspectWebOoxml(withNumbering(simplePackage(content)), { headerFooter: true })).not.toThrow();
+    for (const [name, tag] of [['header1', 'hdr'], ['footer1', 'ftr']]) {
+      expect(() => inspectWebOoxml(withNumbering(withPart(name, `<w:${tag}>${content}</w:${tag}>`)))).not.toThrow();
+    }
+  }
+});
+
+test.each(['ins', 'numberingChange', 'unknown'])('list properties still reject unsupported %s', element => {
+  const xml = simplePackage(listParagraph().replace('</w:numPr>', `<w:${element}/></w:numPr>`));
+  expect(() => inspectWebOoxml(xml)).toThrow('桌面 Word');
+});
 
 test.each(['inline', 'anchor'] as const)('allows %s pictures in body, tables and headers', layout => {
   const p = `<w:p><w:r><w:t>Before</w:t>${picture(layout)}<w:t>After</w:t></w:r></w:p>`;

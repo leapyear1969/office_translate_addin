@@ -2,6 +2,22 @@
 import { prepareOoxml, rebaseOoxml } from './ooxml';
 import { wordPackage } from './test-fixtures/package';
 import { picture } from './test-fixtures/pictures';
+import { listParagraph, withNumbering } from './test-fixtures/lists';
+
+test('translation preserves list levels, continuation, restart and bullet definitions, including latest numbering changes', () => {
+  const original = withNumbering(wordPackage(listParagraph() + listParagraph(1, 1) + listParagraph() + listParagraph(2) + listParagraph(3)));
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(Array(5).fill('<p><span id="r0">Original</span></p>'));
+  const latest = original.replace('<w:startOverride w:val="1"/>', '<w:startOverride w:val="5"/>');
+  const result = rebaseOoxml(plan, latest, Array(5).fill('<p><span id="r0">译文</span></p>'));
+  expect(result.skippedParagraphs).toBe(0);
+  const before = parse(latest), after = parse(result.ooxml);
+  expect(Array.from(after.getElementsByTagNameNS(W, 't')).map(node => node.textContent)).toEqual(Array(5).fill('译文'));
+  for (const doc of [before, after]) for (const node of Array.from(doc.getElementsByTagNameNS(W, 't'))) {
+    node.textContent = ''; node.removeAttributeNS('http://www.w3.org/XML/1998/namespace', 'space');
+  }
+  expect(serialize(after)).toBe(serialize(before));
+});
 
 test.each(['inline', 'anchor'] as const)('translates both sides of a %s picture without changing any image structure', layout => {
   const original = wordPackage(`<w:p><w:r><w:t>Before</w:t>${picture(layout)}<w:t>After</w:t></w:r></w:p>`);

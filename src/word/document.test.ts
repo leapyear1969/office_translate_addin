@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import { resetIndexedDB } from './test-fixtures/indexeddb';
 import * as backupStore from './backup-store';
 import { picture, withPictureParts } from './test-fixtures/pictures';
+import { listParagraph, withNumbering } from './test-fixtures/lists';
 jest.mock('../shared/api');
 
 const webPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
@@ -24,6 +25,21 @@ function setupWeb() {
   (ranges.context.document as any).sections = { load: jest.fn(), items: [{ getHeader: () => extra, getFooter: () => extra }] };
   return { ...ranges, extra, tables };
 }
+
+test.each(['selection', 'paragraph', 'body'] as const)('web %s translates list text and restores its original numbering', async scope => {
+  const ranges = setupWeb();
+  const original = withNumbering(webPackage(listParagraph(3)));
+  ranges.body.ooxml = original;
+  ranges[scope].ooxml = original;
+  await translateDocument(scope, 'ja');
+  const written = ranges[scope].insertOoxml.mock.calls[0][0];
+  expect(written).toContain('译文');
+  expect(written).toContain('<w:numId w:val="3"/>');
+  expect(written).toContain('<w:numFmt w:val="bullet"/>');
+  await restoreOriginalBody();
+  expect(ranges[scope].ooxml).toContain('<w:numId w:val="3"/>');
+  expect(ranges[scope].ooxml).toContain('Original');
+});
 
 test.each(['selection', 'paragraph', 'body'] as const)('web %s checks the whole document before requesting translation', async scope => {
   const ranges = setupWeb();

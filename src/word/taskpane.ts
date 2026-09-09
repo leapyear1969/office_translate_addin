@@ -1,4 +1,5 @@
 import { setupAccount } from '../shared/account';
+import { rememberPaneWidth } from './pane-width';
 import { authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
 import { translateDocument, restoreOriginalBody, clearTranslationControls, Scope } from './document';
@@ -349,6 +350,7 @@ Office.actions.associate('translateSelectionChinese', async (event: Office.Addin
 
 Office.onReady(async info => {
   if (info.host !== Office.HostType.Word) return;
+  rememberPaneWidth();
   if (isWordOnline()) {
     element('document-summary').textContent = '将检查并备份原文，然后翻译当前文档。';
     element('document-detail').textContent = '完成后请保存文档；恢复原文需使用同一浏览器和插件地址。';

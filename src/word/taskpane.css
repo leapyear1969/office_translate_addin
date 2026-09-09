@@ -1,5 +1,6 @@
 :root{font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#101d30;font-size:12px;line-height:1.5;background:#fff}
-main{max-width:520px;padding:12px}
+body{min-width:330px}
+main{min-width:330px;max-width:520px;padding:12px}
 button,select,textarea{font:inherit}
 button,select{border:1px solid #c8d0dc;border-radius:5px;min-height:32px}
 button{display:inline-flex;justify-content:center;align-items:center;gap:9px;padding:5px 8px}

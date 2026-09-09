@@ -7,6 +7,7 @@ import { LANGUAGES } from '../shared/settings';
 import { isWordOnline } from './web-safety';
 import { migrateDocumentBackups } from './backup';
 import { isDesktopWord } from './desktop-copy';
+import { capturePreview, translatePreview, PreviewRange } from './preview';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const target = element<HTMLSelectElement>('target-language');
@@ -19,7 +20,81 @@ let authorizing = false;
 let visible = false;
 let initialized = false;
 let signedOut = false;
+let previewRange: PreviewRange | undefined;
+let previewEpoch = 0;
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
+let composing = false;
+let previewReady = false;
+const sourceText = element<HTMLTextAreaElement>('source-text');
+const translatedText = element<HTMLTextAreaElement>('translated-text');
+const previewTarget = element<HTMLSelectElement>('preview-target');
+function invalidatePreview() {
+  ++previewEpoch;
+  clearTimeout(previewTimer);
+  previewReady = false;
+  translatedText.value = '';
+  element<HTMLButtonElement>('insert-translation').disabled = true;
+}
+async function releasePreview() {
+  const previous = previewRange;
+  previewRange = undefined;
+  if (previous) await previous.release();
+}
+function schedulePreview(immediate = false) {
+  invalidatePreview();
+  if (signedOut || translating || composing || !sourceText.value.trim()) {
+    element('preview-status').textContent = sourceText.value.trim() ? '' : '请输入需要翻译的原文。';
+    return;
+  }
+  const epoch = previewEpoch;
+  const text = sourceText.value;
+  const language = previewTarget.value;
+  element('preview-status').textContent = '正在翻译…';
+  const run = async () => {
+    try {
+      const result = await translatePreview(text, language);
+      if (epoch !== previewEpoch || signedOut) return;
+      translatedText.value = result;
+      previewReady = true;
+      element<HTMLButtonElement>('insert-translation').disabled = !previewRange;
+      element('preview-status').textContent = '译文已更新';
+    } catch (error) {
+      if (epoch !== previewEpoch) return;
+      element('preview-status').textContent = (error as Error).message;
+    }
+  };
+  if (immediate) void run();
+  else previewTimer = setTimeout(() => void run(), 600);
+}
+async function openPreview(scope: 'selection' | 'paragraph', language: string) {
+  invalidatePreview();
+  const epoch = previewEpoch;
+  // Capture before showing the pane, which can change focus in Word.
+  const capture = capturePreview(scope);
+  try {
+    const captured = await capture;
+    if (epoch !== previewEpoch || signedOut) { await captured.release(); return; }
+    await releasePreview();
+    if (epoch !== previewEpoch || signedOut) { await captured.release(); return; }
+    previewRange = captured;
+    sourceText.value = captured.text;
+    previewTarget.value = language;
+    showView(false);
+    status('');
+    schedulePreview(true);
+  } catch (error) {
+    if (epoch === previewEpoch) status((error as Error).message, true);
+  }
+}
+function showView(fullDocument: boolean) {
+  element('selection-view').hidden = fullDocument;
+  element('document-view').hidden = !fullDocument;
+  element('selection-tab').setAttribute('aria-selected', String(!fullDocument));
+  element('document-tab').setAttribute('aria-selected', String(fullDocument));
+}
 const account = setupAccount(() => {
+  invalidatePreview();
+  void releasePreview().catch(() => {});
   signedOut = true;
   ++loginEpoch;
   session = undefined;
@@ -34,6 +109,9 @@ const account = setupAccount(() => {
   status('已注销当前面板账户。点击头像可重新登录。');
 });
 function updateDocumentActions() {
+  sourceText.disabled = translating || signedOut;
+  previewTarget.disabled = translating || signedOut;
+  element<HTMLButtonElement>('insert-translation').disabled = translating || signedOut || !previewReady || !previewRange;
   ['translate-selection', 'translate-paragraph', 'translate-body', 'restore-original', 'confirm-restore', 'compact-backups'].forEach(id => {
     element<HTMLButtonElement>(id).disabled = translating || (signedOut && id.startsWith('translate'));
   });
@@ -49,11 +127,15 @@ function markDirty() { dirty = true; element('save-status').textContent = '尚�
 function currentForm(): WordSettings { return { target: target.value }; }
 async function translateScope(scope: Scope, targetLanguage = settings.target) {
   if (translating || authorizing || signedOut) return;
+  if (scope !== 'body') { await openPreview(scope, targetLanguage); return; }
+  showView(true);
+  invalidatePreview();
   translating = true;
   updateDocumentActions();
   element('restore-prompt').hidden = true;
   status(isWordOnline() ? '正在检查文档是否适合网页版翻译…' : '正在准备翻译副本并翻译…');
   try {
+    await releasePreview();
     const result = await translateDocument(scope, targetLanguage, () => !signedOut);
     status((result?.desktopCopy
       ? '翻译已在副本中完成。请保存副本；后续翻译和恢复请在副本中打开插件操作，原文备份随副本保存。'
@@ -119,6 +201,27 @@ async function signIn(interactive: boolean) {
 }
 
 fillLanguages(target); target.value = 'zh-Hans';
+fillLanguages(previewTarget); previewTarget.value = 'zh-Hans';
+sourceText.addEventListener('input', () => schedulePreview());
+sourceText.addEventListener('compositionstart', () => { composing = true; invalidatePreview(); });
+sourceText.addEventListener('compositionend', () => { composing = false; schedulePreview(); });
+previewTarget.addEventListener('change', () => schedulePreview());
+element('retry-preview').addEventListener('click', () => schedulePreview(true));
+element('clear-source').addEventListener('click', () => { sourceText.value = ''; schedulePreview(); sourceText.focus(); });
+element('selection-tab').addEventListener('click', () => showView(false));
+element('document-tab').addEventListener('click', () => showView(true));
+element('insert-translation').addEventListener('click', async () => {
+  if (translating || signedOut || !previewReady || !previewRange) return;
+  translating = true;
+  updateDocumentActions();
+  try {
+    await previewRange.insert(translatedText.value, () => !signedOut);
+    previewReady = false;
+    await releasePreview();
+    element('preview-status').textContent = '译文已插入，可使用 Word 撤销。继续翻译请重新选择范围。';
+  } catch (error) { element('preview-status').textContent = (error as Error).message; }
+  finally { translating = false; updateDocumentActions(); }
+});
 element('compact-backups').addEventListener('click', async () => {
   if (translating || authorizing) return;
   translating = true;
@@ -187,10 +290,11 @@ Office.onReady(async info => {
   element('desktop-copy-notice').hidden = !isDesktopWord();
   if (isDesktopWord()) {
     element('compact-backups').hidden = true;
-    element('backup-notice').textContent = '桌面端先创建翻译副本，再在副本中翻译。请保存副本，原文备份随副本保存；后续翻译和恢复请在副本中打开插件操作。恢复时保留范围外的编辑，文字已修改的译文会跳过。';
+    element('backup-notice').textContent = '全文翻译每次创建新的副本。请保存副本，原文备份随副本保存；恢复请在副本中打开插件操作。恢复时保留范围外的编辑，文字已修改的译文会跳过。';
   }
   settings = loadSettings();
   target.value = settings.target;
+  previewTarget.value = settings.target;
   updateDocumentActions();
   element<HTMLFieldSetElement>('settings-fields').disabled = false;
   await Office.addin.onVisibilityModeChanged(event => {

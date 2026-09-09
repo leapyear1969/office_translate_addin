@@ -5,6 +5,20 @@
   <title>翻译选项</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <link rel="stylesheet" href="/taskpane.css">
+  <style>
+    .translation-tabs{display:flex;gap:18px;border-bottom:1px solid #ddd;margin-bottom:16px}
+    .translation-tabs button{border:0;border-radius:0;padding:8px 3px;background:transparent}
+    .translation-tabs [aria-selected=true]{border-bottom:2px solid #3858a5;color:#3858a5}
+    .preview-label{display:flex;align-items:center;gap:8px;color:#3858a5;margin:10px 0}
+    .preview-label select{min-width:0;flex:1}
+    .source-editor{position:relative}.source-editor button{position:absolute;right:5px;top:5px;border:0;padding:0;width:28px;min-height:28px;background:transparent}
+    .translation-text{display:block;width:100%;min-height:200px;resize:vertical;font:inherit;line-height:1.5;border:1px solid #777;border-radius:0;padding:10px;white-space:pre-wrap}
+    #source-text{padding-right:36px}#translated-text{background:#f0f6ff;border-color:transparent;color:#242424}
+    .translation-text:focus-visible{outline:2px solid #3858a5;outline-offset:2px}
+    .translation-arrow{text-align:center;color:#3858a5;font-size:24px;margin:2px}
+    .preview-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+    #preview-status{font-size:12px;overflow-wrap:anywhere;margin-top:10px}
+  </style>
 </head>
 <body>
   <main>
@@ -27,11 +41,31 @@
       </div>
     </header>
     <p id="browser-consent" hidden>如果浏览器没有打开，请<a id="browser-consent-link" target="_blank" rel="noopener noreferrer">点击此处继续授权</a>，或复制链接到默认浏览器。授权完成后请关闭浏览器窗口，并重新打开插件。</p>
-    <p id="web-backup-notice" class="hint" hidden><strong>翻译前请先备份：</strong>在 Word 的“文件 → 创建副本（或另存为）”中保存一份原稿。网页版翻译会替换当前文档内容，支持文字、基本格式、普通表格（包括空表格）和普通图片；图片保留，图片内部文字不翻译。嵌套表格、合并单元格、文本框或 SmartArt 等复杂结构，或超过 20000 个文字字符、500 个段落、5 MB 结构数据的文档，请使用桌面 Word 客户端打开并翻译。正文全文翻译包含正文表格中的文字，页眉和页脚保持原样。</p>
-    <p id="desktop-copy-notice" class="hint" hidden>点击翻译后将创建完整文档副本，并在副本中翻译选定范围。完成后打开副本；翻译失败时也会打开副本供检查。在副本中继续翻译不会再次创建副本。</p>
+    <nav class="translation-tabs" role="tablist" aria-label="翻译范围">
+      <button id="selection-tab" role="tab" aria-selected="true" aria-controls="selection-view" type="button">选中文字</button>
+      <button id="document-tab" role="tab" aria-selected="false" aria-controls="document-view" type="button">文档</button>
+    </nav>
+    <section id="selection-view" role="tabpanel" aria-labelledby="selection-tab">
     <section class="message-actions" aria-label="当前文档操作">
       <button id="translate-selection" type="button" class="primary" disabled>翻译选中文字</button>
       <button id="translate-paragraph" type="button" disabled>翻译当前段落</button>
+    </section>
+    <label class="preview-label" for="source-text">原文 · 自动检测语言</label>
+    <div class="source-editor">
+      <textarea id="source-text" class="translation-text" placeholder="选中文字或将光标放在段落内，然后点击上方按钮。也可以在此输入原文。" maxlength="20000"></textarea>
+      <button id="clear-source" type="button" aria-label="清空原文">×</button>
+    </div>
+    <div class="translation-arrow" aria-hidden="true">↓</div>
+    <label class="preview-label" for="preview-target">译为 <select id="preview-target"></select></label>
+    <textarea id="translated-text" class="translation-text" readonly aria-label="译文（只读）" placeholder="译文会随原文自动更新"></textarea>
+    <p id="preview-status" role="status" aria-live="polite"></p>
+    <div class="preview-footer"><button id="retry-preview" type="button">重新翻译</button><button id="insert-translation" type="button" class="primary" disabled>插入</button></div>
+    <p class="hint">编辑上方原文会自动重译。点击“插入”将以纯文本译文替换最初选中的文字或段落，可使用 Word 撤销。</p>
+    </section>
+    <section id="document-view" role="tabpanel" aria-labelledby="document-tab" hidden>
+    <p id="web-backup-notice" class="hint" hidden><strong>翻译前自动检查并备份原文：</strong>符合要求后直接翻译当前文档。支持文字、基本格式、普通表格（包括空表格）和普通图片；图片保留，图片内部文字不翻译。嵌套表格、合并单元格、文本框或 SmartArt 等复杂结构，或超过 20000 个文字字符、500 个段落、5 MB 结构数据的文档，请使用桌面 Word 客户端打开并翻译。正文全文翻译包含正文表格中的文字，页眉和页脚保持原样。</p>
+    <p id="desktop-copy-notice" class="hint" hidden>全文翻译每次创建完整文档的新副本，并在副本中翻译。完成后打开副本，请保存；翻译失败时也会打开副本供检查。</p>
+    <section class="message-actions" aria-label="全文操作">
       <button id="translate-body" type="button" disabled>翻译正文全文</button>
       <button id="restore-original" type="button" disabled>恢复原文</button>
       <button id="compact-backups" type="button" disabled>将旧备份移到此浏览器</button>
@@ -44,11 +78,12 @@
     </section>
     <form id="preferences">
       <fieldset id="settings-fields" disabled>
-        <p class="hint">文档默认不翻译，选中需要的内容后点击翻译按钮，或主动选择翻译当前段落、正文全文。全文翻译保留 Word 原生结构，无法安全处理的段落保留原文并提示；译文长度变化仍可能影响换行和分页。当前段落指光标所在段落或选区的第一个段落。译文替换原文，可使用 Word 撤销或恢复原文备份。目标语言设置随当前文档保存。</p>
+        <p class="hint">全文翻译保留 Word 原生结构，无法安全处理的段落保留原文并提示；译文长度变化仍可能影响换行和分页。当前段落指光标所在段落或选区的第一个段落。目标语言设置随当前文档保存。</p>
         <div class="target-row"><label for="target-language">将文档翻译为：</label><select id="target-language" name="target"></select></div>
         <div class="footer"><button class="primary" type="submit" id="save">保存设置</button><span id="save-status" role="status" aria-live="polite"></span></div>
       </fieldset>
     </form>
+    </section>
     <p id="status" role="status" aria-live="polite"></p>
   </main>
 </body>

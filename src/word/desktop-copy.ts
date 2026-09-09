@@ -60,7 +60,7 @@ export async function prepareDesktopCopy(context: Word.RequestContext, scope: Sc
   range.load('text');
   await context.sync();
   if (!range.text.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
-  if (Office.context.document.settings.get(COPY_KEY) === true) {
+  if (scope !== 'body' && Office.context.document.settings.get(COPY_KEY) === true) {
     return { document: source as Word.Document | Word.DocumentCreated, range, created: false, finish: async () => {} };
   }
   if (!Office.context.requirements.isSetSupported('WordApiHiddenDocument', '1.4')

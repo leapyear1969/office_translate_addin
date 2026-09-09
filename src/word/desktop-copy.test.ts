@@ -44,13 +44,13 @@ test.each(['selection', 'paragraph', 'body'] as const)('creates full copy and bi
   expect(copy.open).toHaveBeenCalledTimes(1);
 });
 
-test('existing translation copy is reused', async () => {
-  const { context, settings, source, getFileAsync } = setup();
-  settings.get.mockReturnValue(true);
+test('full-body translation creates a fresh copy even from a translation copy', async () => {
+  const { context, settings, copy, getFileAsync } = setup();
+  settings.get.mockImplementation(key => key === COPY_KEY ? true : undefined);
   const prepared = await prepareDesktopCopy(context, 'body');
-  expect(prepared.document).toBe(source);
-  expect(getFileAsync).not.toHaveBeenCalled();
-  expect(context.application.createDocument).not.toHaveBeenCalled();
+  expect(prepared.document).toBe(copy);
+  expect(getFileAsync).toHaveBeenCalled();
+  expect(context.application.createDocument).toHaveBeenCalled();
 });
 
 test('failed export cleans source bookmark and closes the file without creating a copy', async () => {

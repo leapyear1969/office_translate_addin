@@ -26,17 +26,19 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   let saved: unknown = { mode, target: 'ja', excluded };
   let ready: Function = () => {};
   const commands: Record<string, Function> = {};
+  const addHandlerAsync = jest.fn();
   const saveAsync = jest.fn((cb: Function) => cb({ status: 'succeeded' }));
   (globalThis as any).Office = {
+    EventType: { DocumentSelectionChanged: 'selectionChanged' },
     onReady: (cb: Function) => { ready = cb; }, HostType: { Word: 'Word' },
     AsyncResultStatus: { Succeeded: 'succeeded' }, VisibilityMode: { taskpane: 'Taskpane' },
     actions: { associate: (name: string, fn: Function) => { commands[name] = fn; } },
     addin: { showAsTaskpane: jest.fn(async () => {}), onVisibilityModeChanged: jest.fn(async () => {}) },
     PlatformType: { OfficeOnline: 'OfficeOnline' },
-    context: { platform: web ? 'OfficeOnline' : undefined, document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
+    context: { platform: web ? 'OfficeOnline' : undefined, document: { addHandlerAsync, settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
   };
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
-  return { captured, capturePreview, translatePreview, translateDocument, restoreOriginalBody, clearTranslationControls, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
+  return { addHandlerAsync, captured, capturePreview, translatePreview, translateDocument, restoreOriginalBody, clearTranslationControls, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
 
 test('clear controls releases the preview, reports failures and permits retry without authentication', async () => {
@@ -47,7 +49,8 @@ test('clear controls releases the preview, reports failures and permits retry wi
   button('clear-translation-controls').click(); await settle();
   expect(captured.release).toHaveBeenCalled();
   expect(button('insert-translation').disabled).toBe(true);
-  expect(button('status').textContent).toBe('清除失败');
+  expect(button('status').textContent).toBe('修复失败：清除失败');
+  expect(button('clear-translation-controls').hidden).toBe(false);
   expect(button('clear-translation-controls').disabled).toBe(false);
   button('clear-translation-controls').click(); await settle();
   expect(button('status').textContent).toContain('已清除 2 个翻译控件');
@@ -125,7 +128,7 @@ test('failed settings save keeps the previous target and allows retry', async ()
   const target = document.getElementById('target-language') as HTMLSelectElement;
   target.value = 'en'; target.dispatchEvent(new Event('change', { bubbles: true }));
   button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
-  expect(button('save-status').textContent).toContain('保存设置失败');
+  expect(button('status').textContent).toContain('保存设置失败');
   button('translate-selection').click(); await settle();
   expect(translatePreview).toHaveBeenLastCalledWith('Original text', 'ja');
   button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
@@ -279,4 +282,77 @@ test('signout discards in-flight preview results', async () => {
   resolve('Late translation'); await settle();
   expect(textarea('translated-text').value).toBe('');
   expect(button('insert-translation').disabled).toBe(true);
+});
+
+
+test('selection and paragraph share the panel, document scope switches without translating', async () => {
+  const { translateDocument, capturePreview } = await setup();
+  button('translate-paragraph').click(); await settle();
+  expect(button('selection-view').hidden).toBe(false);
+  expect(button('translate-paragraph').getAttribute('aria-selected')).toBe('true');
+  button('document-tab').click(); await settle();
+  expect(button('selection-view').hidden).toBe(true);
+  expect(button('document-view').hidden).toBe(false);
+  expect(translateDocument).not.toHaveBeenCalled();
+  button('translate-selection').click(); await settle();
+  expect(button('selection-view').hidden).toBe(false);
+  expect(capturePreview).toHaveBeenLastCalledWith('selection');
+});
+
+test('overlap errors use the bottom repair notification and repairs only run after a click', async () => {
+  const { capturePreview, clearTranslationControls } = await setup();
+  capturePreview.mockRejectedValueOnce(new Error('所选范围包含尚未恢复的翻译，请先恢复该翻译，再重新选择内容。'));
+  button('translate-selection').click(); await settle();
+  expect(button('notification').hidden).toBe(false);
+  expect(button('notification').classList.contains('warning')).toBe(true);
+  expect(button('status').textContent).toBe('检测到翻译控件异常，是否修复？');
+  expect(button('clear-translation-controls').hidden).toBe(false);
+  expect(clearTranslationControls).not.toHaveBeenCalled();
+  button('clear-translation-controls').click(); await settle();
+  expect(clearTranslationControls).toHaveBeenCalledTimes(1);
+  expect(button('clear-translation-controls').hidden).toBe(true);
+  button('dismiss-status').click();
+  expect(button('notification').hidden).toBe(true);
+});
+
+test('preview failures use the common bottom notification and retry can recover', async () => {
+  const { translatePreview } = await setup();
+  translatePreview.mockRejectedValueOnce(new Error('网络连接失败'));
+  button('translate-selection').click(); await settle();
+  expect(button('status').textContent).toBe('网络连接失败');
+  expect(button('notification').classList.contains('error')).toBe(true);
+  button('retry-preview').click(); await settle();
+  expect(button('status').textContent).toBe('翻译完成');
+  expect(button('notification').classList.contains('success')).toBe(true);
+});
+
+test('switching to document ignores a pending selection capture', async () => {
+  const { capturePreview, captured } = await setup();
+  let resolve!: (value: typeof captured) => void;
+  capturePreview.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  button('translate-selection').click();
+  button('document-tab').click();
+  resolve(captured); await settle();
+  expect(button('document-view').hidden).toBe(false);
+  expect(captured.release).toHaveBeenCalled();
+});
+
+
+test('Word selection changes debounce and respect paragraph and document scopes', async () => {
+  jest.useFakeTimers();
+  try {
+    const { addHandlerAsync, capturePreview } = await setup();
+    const changed = addHandlerAsync.mock.calls[0][1];
+    button('translate-paragraph').click(); await settle();
+    capturePreview.mockClear();
+    changed(); changed();
+    jest.advanceTimersByTime(249);
+    expect(capturePreview).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1); await settle();
+    expect(capturePreview).toHaveBeenCalledTimes(1);
+    expect(capturePreview).toHaveBeenLastCalledWith('paragraph');
+    button('document-tab').click(); capturePreview.mockClear();
+    changed(); jest.advanceTimersByTime(300); await settle();
+    expect(capturePreview).not.toHaveBeenCalled();
+  } finally { jest.useRealTimers(); }
 });

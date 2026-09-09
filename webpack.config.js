@@ -45,7 +45,7 @@ module.exports = async (env = {}, argv) => {
         inject: "body",
       }),
       new CopyWebpackPlugin({
-        patterns: [...hosts.map(host => ({ from: `manifest.${host}.xml`, to: `manifests/manifest.${host}.xml` })), { from: "src/assets", to: "assets" }, { from: "src/taskpane/taskpane.css", to: "taskpane.css" }],
+        patterns: [...hosts.map(host => ({ from: `manifest.${host}.xml`, to: `manifests/manifest.${host}.xml` })), { from: "src/assets", to: "assets" }, { from: "src/taskpane/taskpane.css", to: "taskpane.css" }, { from: "src/word/taskpane.css", to: "word/taskpane.css" }, { from: "node_modules/bootstrap-icons/font", to: "icons" }],
       }),
       new HtmlWebpackPlugin({ filename: "taskpane.html", template: "./src/taskpane/taskpane.html", chunks: ["taskpane"], inject: "body" }),
       new HtmlWebpackPlugin({ filename: "original.html", template: "./src/taskpane/original.html", chunks: ["original"], inject: "body" }),

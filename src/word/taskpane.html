@@ -2,27 +2,19 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>翻译选项</title>
+  <title>Word 文档翻译</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <link rel="stylesheet" href="/taskpane.css">
-  <style>
-    .translation-tabs{display:flex;gap:18px;border-bottom:1px solid #ddd;margin-bottom:16px}
-    .translation-tabs button{border:0;border-radius:0;padding:8px 3px;background:transparent}
-    .translation-tabs [aria-selected=true]{border-bottom:2px solid #3858a5;color:#3858a5}
-    .preview-label{display:flex;align-items:center;gap:8px;color:#3858a5;margin:10px 0}
-    .preview-label select{min-width:0;flex:1}
-    .source-editor{position:relative}.source-editor button{position:absolute;right:5px;top:5px;border:0;padding:0;width:28px;min-height:28px;background:transparent}
-    .translation-text{display:block;width:100%;min-height:200px;resize:vertical;font:inherit;line-height:1.5;border:1px solid #777;border-radius:0;padding:10px;white-space:pre-wrap}
-    #source-text{padding-right:36px}#translated-text{background:#f0f6ff;border-color:transparent;color:#242424}
-    .translation-text:focus-visible{outline:2px solid #3858a5;outline-offset:2px}
-    .preview-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
-    #preview-status{font-size:12px;overflow-wrap:anywhere;margin-top:10px}
-  </style>
+  <link rel="stylesheet" href="/icons/bootstrap-icons.css">
+  <link rel="stylesheet" href="/word/taskpane.css">
 </head>
-<body>
-  <main>
-    <header class="pane-header">
-      <h1><img class="heading-icon" src="/assets/icon-32.png" width="24" height="24" alt="">翻译选项</h1>
+<body><main>
+  <header class="word-header">
+    <img class="brand-icon" src="/assets/icon-80.png" width="56" height="56" alt="">
+    <div class="brand-copy"><h1>翻译</h1><p>让文档没有语言障碍</p></div>
+    <button id="open-settings" class="icon-button" type="button" aria-label="设置" title="设置"><i class="bi bi-gear" aria-hidden="true"></i></button>
+  </header>
+  <section id="settings-panel" hidden aria-label="账户与高级设置">
       <div class="account-control">
         <button id="account-avatar" class="account-avatar" type="button" aria-label="用户账户" aria-haspopup="dialog" aria-expanded="false" aria-controls="account-menu">
           <img id="account-photo" alt="" hidden><span id="account-initial" aria-hidden="true">人</span>
@@ -38,55 +30,58 @@
           </div>
         </section>
       </div>
-    </header>
-    <p id="browser-consent" hidden>如果浏览器没有打开，请<a id="browser-consent-link" target="_blank" rel="noopener noreferrer">点击此处继续授权</a>，或复制链接到默认浏览器。授权完成后请关闭浏览器窗口，并重新打开插件。</p>
-    <nav class="translation-tabs" role="tablist" aria-label="翻译范围">
-      <button id="selection-tab" role="tab" aria-selected="true" aria-controls="selection-view" type="button">选中文字</button>
-      <button id="document-tab" role="tab" aria-selected="false" aria-controls="document-view" type="button">文档</button>
-    </nav>
-    <section id="selection-view" role="tabpanel" aria-labelledby="selection-tab">
-    <section class="message-actions" aria-label="当前文档操作">
-      <button id="translate-selection" type="button" class="primary" disabled>翻译选中文字</button>
-      <button id="translate-paragraph" type="button" disabled>翻译当前段落</button>
-    </section>
-    <label class="preview-label" for="source-text">原文 · 自动检测语言</label>
-    <div class="source-editor">
-      <textarea id="source-text" class="translation-text" placeholder="选中文字或将光标放在段落内，然后点击上方按钮。也可以在此输入原文。" maxlength="20000"></textarea>
-      <button id="clear-source" type="button" aria-label="清空原文">×</button>
-    </div>
-    <label class="preview-label" for="preview-target">译为 <select id="preview-target"></select></label>
-    <textarea id="translated-text" class="translation-text" readonly aria-label="译文（只读）" placeholder="译文会随原文自动更新"></textarea>
-    <p id="preview-status" role="status" aria-live="polite"></p>
-    <div class="preview-footer"><button id="retry-preview" type="button">重新翻译</button><button id="insert-translation" type="button" class="primary" disabled>插入</button></div>
-    <p class="hint">编辑上方原文会自动重译。点击“插入”将以纯文本译文替换最初选中的文字或段落，可使用 Word 撤销。</p>
-    </section>
-    <section id="document-view" role="tabpanel" aria-labelledby="document-tab" hidden>
-    <p id="web-backup-notice" class="hint" hidden><strong>翻译前自动检查并备份原文：</strong>符合要求后直接翻译当前文档。支持文字、基本格式、普通表格（包括空表格）和普通图片；图片保留，图片内部文字不翻译。嵌套表格、合并单元格、文本框或 SmartArt 等复杂结构，或超过 20000 个文字字符、500 个段落、5 MB 结构数据的文档，请使用桌面 Word 客户端打开并翻译。正文全文翻译包含正文表格中的文字，页眉和页脚保持原样。</p>
+
+    <p class="hint">账户与文档维护</p>
+    <button id="compact-backups" type="button" disabled>将旧备份移到此浏览器</button>
+    <details><summary>翻译与备份说明</summary>    <p id="web-backup-notice" class="hint" hidden><strong>翻译前自动检查并备份原文：</strong>符合要求后直接翻译当前文档。支持文字、基本格式、普通表格（包括空表格）和普通图片；图片保留，图片内部文字不翻译。嵌套表格、合并单元格、文本框或 SmartArt 等复杂结构，或超过 20000 个文字字符、500 个段落、5 MB 结构数据的文档，请使用桌面 Word 客户端打开并翻译。正文全文翻译包含正文表格中的文字，页眉和页脚保持原样。</p>
     <p id="desktop-copy-notice" class="hint" hidden>全文翻译每次创建完整文档的新副本，并在副本中翻译。完成后打开副本，请保存；翻译失败时也会打开副本供检查。</p>
-    <section class="message-actions" aria-label="全文操作">
-      <button id="translate-body" type="button" disabled>翻译正文全文</button>
-      <button id="restore-original" type="button" disabled>恢复原文</button>
-      <button id="compact-backups" type="button" disabled>将旧备份移到此浏览器</button>
-    </section>
     <p id="backup-notice" class="hint">原文备份仅保存在当前浏览器，不随文件共享。恢复需使用同一浏览器配置和插件地址；更换设备、浏览器、使用隐私模式或清除站点数据后可能无法恢复。桌面 Word 与网页版的备份也不互通。请另存原文件副本。恢复该范围的原文及原格式，范围外的编辑会保留；译文文字已修改时跳过。重叠范围需先恢复原文，或清除翻译控件并保留译文后再翻译。</p>
+</details>
+  </section>
+    <p id="browser-consent" hidden>如果浏览器没有打开，请<a id="browser-consent-link" target="_blank" rel="noopener noreferrer">点击此处继续授权</a>，或复制链接到默认浏览器。授权完成后请关闭浏览器窗口，并重新打开插件。</p>
+
+  <div class="scope-label">翻译范围 <i class="bi bi-question-circle" title="选中内容和当前段落提供译文预览；全文翻译整个文档。" aria-label="范围说明"></i></div>
+  <nav class="translation-tabs" role="tablist" aria-label="翻译范围">
+    <button id="translate-selection" role="tab" aria-selected="true" aria-controls="selection-view" type="button" disabled><i class="bi bi-bounding-box-circles" aria-hidden="true"></i>选中内容</button>
+    <button id="translate-paragraph" role="tab" aria-selected="false" aria-controls="selection-view" type="button" disabled><i class="bi bi-text-left" aria-hidden="true"></i>当前段落</button>
+    <button id="document-tab" role="tab" aria-selected="false" aria-controls="document-view" type="button"><i class="bi bi-file-earmark-text" aria-hidden="true"></i>全文</button>
+  </nav>
+  <section id="selection-view" role="tabpanel" aria-labelledby="translate-selection">
+    <label class="field-label" for="source-language">源语言 <i class="bi bi-question-circle" title="翻译服务自动识别原文语言。" aria-label="自动识别语言"></i></label>
+    <select id="source-language" aria-label="源语言"><option>自动检测语言</option></select>
+    <div class="field-label source-label"><label for="source-text">原文 <span id="source-count">（0 个字符）</span></label><button id="clear-source" class="text-button" type="button"><i class="bi bi-x" aria-hidden="true"></i>清空</button></div>
+    <textarea id="source-text" class="translation-text" placeholder="在 Word 中选中内容，或在此输入原文" maxlength="20000"></textarea>
+    <label class="field-label target-label" for="preview-target">目标语言</label>
+    <select id="preview-target"></select>
+    <label class="field-label" for="translated-text">译文</label>
+    <div class="translation-result">
+      <textarea id="translated-text" class="translation-text" readonly placeholder="译文将在此显示"></textarea>
+      <div class="result-tools"><button id="copy-translation" class="icon-button" type="button" aria-label="复制译文" title="复制译文"><i class="bi bi-copy" aria-hidden="true"></i></button><button id="more-translation" class="icon-button" type="button" aria-label="更多操作" aria-expanded="false" aria-controls="translation-menu"><i class="bi bi-three-dots" aria-hidden="true"></i></button></div>
+      <div id="translation-menu" hidden><button id="select-translation" type="button">选择全部译文</button></div>
+    </div>
+    <p class="preview-hint"><i class="bi bi-info-circle" aria-hidden="true"></i>译文会随 Word 中的选中内容自动更新。</p>
+    <div class="preview-footer"><button id="retry-preview" type="button"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>重新翻译</button><button id="insert-translation" type="button" class="primary" disabled><i class="bi bi-file-earmark-arrow-down" aria-hidden="true"></i>替换原文</button></div>
+  </section>
+  <section id="document-view" role="tabpanel" aria-labelledby="document-tab" hidden>
+    <section class="document-card"><h2><i class="bi bi-file-earmark-text" aria-hidden="true"></i>全文翻译</h2>
+      <div class="document-info"><i class="bi bi-file-earmark" aria-hidden="true"></i><div><strong id="document-summary">将创建文档的副本并对全文进行翻译。</strong><p id="document-detail">完成后请保存翻译后的副本；翻译失败时也会打开副本供检查。</p></div></div>
+      <div class="document-actions"><button id="translate-body" type="button" class="primary" disabled><i class="bi bi-file-earmark-arrow-down" aria-hidden="true"></i>翻译整篇文档</button><button id="restore-original" type="button" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>恢复原文</button></div>
     <section id="restore-prompt" hidden aria-label="确认恢复原文">
       <p>恢复所有文字未修改的译文及其原格式？翻译范围内后改的格式、图片等也会还原；范围外的编辑会保留，文字已修改的译文会跳过。</p>
       <button id="confirm-restore" type="button">确认恢复翻译内容</button>
       <button id="cancel-restore" type="button">取消</button>
     </section>
-    <form id="preferences">
-      <fieldset id="settings-fields" disabled>
-        <p class="hint">全文翻译保留 Word 原生结构，无法安全处理的段落保留原文并提示；译文长度变化仍可能影响换行和分页。当前段落指光标所在段落或选区的第一个段落。目标语言设置随当前文档保存。</p>
-        <div class="target-row"><label for="target-language">将文档翻译为：</label><select id="target-language" name="target"></select></div>
-        <div class="footer"><button class="primary" type="submit" id="save">保存设置</button><span id="save-status" role="status" aria-live="polite"></span></div>
-      </fieldset>
-    </form>
+
     </section>
-    <section aria-label="清除翻译控件">
-      <button id="clear-translation-controls" type="button" aria-describedby="clear-controls-notice" disabled>清除全部翻译控件（保留译文）</button>
-      <p id="clear-controls-notice" class="hint">移除当前文档中本插件的全部翻译控件，保留文字和格式，之后可重新选择翻译。清除后这些范围无法通过“恢复原文”还原；需要撤销清除时请使用 Word 撤销。</p>
-    </section>
-    <p id="status" role="status" aria-live="polite"></p>
-  </main>
-</body>
-</html>
+    <form id="preferences"><fieldset id="settings-fields" disabled>
+      <section class="document-card"><h2><i class="bi bi-globe2" aria-hidden="true"></i>目标语言</h2><label for="target-language" class="muted">将文档翻译为：</label><select id="target-language" name="target"></select></section>
+      <section class="document-card"><h2><i class="bi bi-gear" aria-hidden="true"></i>保存设置</h2><p id="settings-description" class="hint">保存当前文档的翻译设置，原文备份随副本保存。</p><button class="primary save-button" type="submit" id="save"><i class="bi bi-floppy" aria-hidden="true"></i>保存设置</button></section>
+    </fieldset></form>
+  </section>
+  <section id="notification" class="notification" role="status" aria-live="polite" hidden>
+    <i id="status-icon" class="bi bi-check-circle-fill" aria-hidden="true"></i>
+    <div class="notification-copy"><p id="status"></p><p id="repair-description" hidden>修复会移除本插件的翻译控件并保留文字和格式；之后这些范围无法通过“恢复原文”还原，可使用 Word 撤销。</p></div>
+    <button id="clear-translation-controls" type="button" hidden disabled>立即修复</button>
+    <button id="dismiss-status" class="icon-button" type="button" aria-label="关闭提示"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+  </section>
+</main></body></html>

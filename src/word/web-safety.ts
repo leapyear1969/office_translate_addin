@@ -15,7 +15,7 @@ export function isWordOnline(): boolean {
 // (styles, relationships, etc.) is not itself document content.
 const children: Record<string, string[]> = {
   body: ['p', 'tbl', 'sectPr'], p: ['pPr', 'r'], r: ['rPr', 't', 'tab', 'br', 'cr'], t: [], tab: [], br: [], cr: [],
-  pPr: ['pStyle', 'numPr', 'keepNext', 'keepLines', 'pageBreakBefore', 'widowControl', 'spacing', 'ind', 'jc', 'outlineLvl', 'rPr', 'tabs', 'contextualSpacing', 'bidi', 'cnfStyle'],
+  pPr: ['pStyle', 'numPr', 'keepNext', 'keepLines', 'pageBreakBefore', 'widowControl', 'spacing', 'ind', 'jc', 'outlineLvl', 'rPr', 'tabs', 'contextualSpacing', 'bidi', 'cnfStyle', 'shd'],
   // List references and levels are preserved; only paragraph text is translated.
   numPr: ['ilvl', 'numId'],
   rPr: ['rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps', 'strike', 'dstrike', 'color', 'spacing', 'w', 'kern', 'position', 'sz', 'szCs', 'highlight', 'u', 'vertAlign', 'rtl', 'cs', 'lang', 'noProof', 'shd'],

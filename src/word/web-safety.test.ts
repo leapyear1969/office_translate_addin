@@ -2,6 +2,29 @@
 import { inspectWebOoxml, WEB_LIMITS } from './web-safety';
 import { picture, withPictureParts } from './test-fixtures/pictures';
 import { listParagraph, withNumbering } from './test-fixtures/lists';
+import { prepareOoxml } from './ooxml';
+
+test('allows paragraph shading and preserves it during translation', () => {
+  const properties = '<w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F5FAFF"/><w:spacing w:after="360"/><w:jc w:val="center"/></w:pPr>';
+  const paragraph = `<w:p>${properties}<w:r><w:t>Original</w:t></w:r></w:p>`;
+  const xml = simplePackage(paragraph);
+  expect(() => inspectWebOoxml(xml)).not.toThrow();
+  expect(() => inspectWebOoxml(xml, { headerFooter: true })).not.toThrow();
+  for (const [name, tag] of [['header', 'hdr'], ['footer', 'ftr']]) {
+    expect(() => inspectWebOoxml(withPart(name, `<w:${tag}>${paragraph}</w:${tag}>`))).not.toThrow();
+  }
+  const result = prepareOoxml(xml).apply(['<p><span id="r0">译文</span></p>']);
+  expect(result.skippedParagraphs).toBe(0);
+  expect(result.ooxml).toContain(properties);
+  expect(result.ooxml).toContain('>译文</w:t>');
+  expect(() => inspectWebOoxml(result.ooxml)).not.toThrow();
+});
+
+test.each(['<w:unknown/>', '<w:shd xmlns:w="urn:foreign"/>', '<w:shd><w:unknown/></w:shd>'])('shading support still rejects unsupported properties: %s', property => {
+  const xml = simplePackage(`<w:p><w:pPr>${property}</w:pPr></w:p>`);
+  expect(() => inspectWebOoxml(xml)).toThrow('桌面 Word');
+  expect(() => inspectWebOoxml(xml, { headerFooter: true })).toThrow('桌面 Word');
+});
 
 test('allows numbered, multilevel and bullet lists in body, tables and headers/footers', () => {
   const lists = listParagraph() + listParagraph(1, 1) + listParagraph(2) + listParagraph(3);

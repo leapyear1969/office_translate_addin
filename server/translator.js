@@ -100,7 +100,21 @@ function createTranslator(config) {
         const response = await call('translate', batch, to, 'html');
         const values = Array.isArray(response) ? response.map(item => item.translations?.[0]?.text) : [];
         if (values.length !== batch.length || values.some(value => typeof value !== 'string' || !value.trim())) throw new Error('翻译结果不完整');
-        translated.push(...values);
+        for (let index = 0; index < values.length; index++) {
+          let value = values[index];
+          if (!hasWordMarkers(batch[index], value)) {
+            // HTML translation can move words outside spans, empty linked
+            // spans or reorder them. Retry only this paragraph as plain text
+            // fragments and rebuild its original markup locally.
+            value = await translateHtml(batch[index], to, async texts => {
+              if (Date.now() - started > 75000) throw new Error('全文翻译超时');
+              const retry = await call('translate', texts, to);
+              return Array.isArray(retry) ? retry.map(item => item.translations?.[0]?.text) : null;
+            });
+            if (!hasWordMarkers(batch[index], value)) throw new Error('译文格式标记无法安全对应原文，请重试。');
+          }
+          translated.push(value);
+        }
       }
       if (translated.join('').length > 1000000) throw new Error('译文过长');
       return translated;
@@ -116,5 +130,21 @@ function createTranslator(config) {
       return { language: result.language, score: result.score };
     }),
   };
+}
+
+// Match the client's fail-closed mapping contract before returning paragraphs.
+function hasWordMarkers(source, translated) {
+  const options = { xml: { xmlMode: false, decodeEntities: true } };
+  const original = cheerio.load(source, options);
+  const result = cheerio.load(translated, options);
+  const paragraphs = result.root().children();
+  if (paragraphs.length !== 1 || paragraphs[0].name !== 'p') return false;
+  const paragraph = paragraphs.first();
+  const spans = paragraph.children();
+  const expected = original('p').first().children();
+  const looseText = nodes => nodes.toArray().some(node => node.type === 'text' && node.data.trim());
+  if (spans.length !== expected.length || looseText(result.root().contents()) || looseText(paragraph.contents())) return false;
+  return spans.toArray().every((span, i) => span.name === 'span' && span.attribs.id === `r${i}`
+    && result(span).children().length === 0 && (!original(expected[i]).text().trim() || result(span).text().trim()));
 }
 module.exports = { translateHtml, detectHtml, createTranslator };

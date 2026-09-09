@@ -6,7 +6,7 @@ describe('Word paragraph translation', () => {
   const service = () => createTranslator({ translatorKey: 'test', translatorEndpoint: 'https://translator.example/' });
   test('sends entire mixed-format paragraphs in HTML mode and batches within limits', async () => {
     const paragraph = '<p><span id="r0">Hello </span><span id="r1">world</span></p>';
-    const paragraphs = Array(102).fill(paragraph).concat(['<p>' + 'x'.repeat(39000) + '</p>', '<p>' + 'y'.repeat(39000) + '</p>']);
+    const paragraphs = Array(102).fill(paragraph).concat(['<p><span id="r0">' + 'x'.repeat(39000) + '</span></p>', '<p><span id="r0">' + 'y'.repeat(39000) + '</span></p>']);
     global.fetch = jest.fn(async (_url, options) => ({ ok: true,
       json: async () => JSON.parse(options.body).map(({ Text }) => ({ translations: [{ text: Text }] })),
     }));
@@ -23,6 +23,33 @@ describe('Word paragraph translation', () => {
   test('rejects incomplete provider output rather than losing paragraphs', async () => {
     global.fetch = jest.fn(async () => ({ ok: true, json: async () => [] }));
     await expect(service().translateWord(['<p>Hello</p>'], 'en')).rejects.toThrow('不完整');
+  });
+  test.each([
+    '<p><span id="r0">整段译文</span><span id="r1"></span></p>',
+    '<p><span id="r1">链接</span><span id="r0">正文</span></p>',
+    '<p><span id="r0">正文</span>未标记文字<span id="r1">链接</span></p>',
+    '<p><span id="r0">正文</span></p>',
+  ])('retries broken markers as plain fragments and keeps valid paragraphs: %s', broken => {
+    const valid = '<p><span id="r0">Valid</span></p>';
+    const source = '<p><span id="r0">Body </span><span id="r1">Link</span></p>';
+    global.fetch = jest.fn(async (url, options) => ({ ok: true, json: async () =>
+      url.searchParams.get('textType') === 'html'
+        ? [valid, broken].map(text => ({ translations: [{ text }] }))
+        : JSON.parse(options.body).map(({ Text }) => ({ translations: [{ text: Text.trim() === 'Body' ? '正文' : '链接 <安全>' }] })),
+    }));
+    return service().translateWord([valid, source], 'zh-Hans').then(result => {
+      expect(result).toEqual([valid, '<p><span id="r0">正文 </span><span id="r1">链接 &lt;安全&gt;</span></p>']);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual([{ Text: 'Body ' }, { Text: 'Link' }]);
+      expect(global.fetch.mock.calls[1][0].searchParams.has('textType')).toBe(false);
+    });
+  });
+  test('rejects empty fallback translations instead of returning a partially untranslated document', async () => {
+    global.fetch = jest.fn(async url => ({ ok: true, json: async () => [{ translations: [{
+      text: url.searchParams.get('textType') === 'html' ? '<p><span id="r0"></span></p>' : ' ',
+    }] }] }));
+    await expect(service().translateWord(['<p><span id="r0">Original</span></p>'], 'zh-Hans')).rejects.toThrow('格式标记');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });
 

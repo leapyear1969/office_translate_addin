@@ -9,6 +9,8 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'taskpane.html'), 'utf8');
   const translateDocument = jest.fn(async (..._args: any[]) => {});
   const restoreOriginalBody = jest.fn(async () => ({ restored: 1, skipped: 0 }));
+  const migrateDocumentBackups = jest.fn(async () => false);
+  jest.doMock('./backup', () => ({ migrateDocumentBackups }));
   const api = jest.fn(async () => ({ language: 'en', score: 1 }));
   const authenticate = jest.fn(async () => ({ token: 'token', user: { displayName: 'User', mail: 'user@example.com' } }));
   jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody }));
@@ -28,8 +30,20 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
     context: { platform: web ? 'OfficeOnline' : undefined, document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
   };
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
-  return { translateDocument, restoreOriginalBody, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
+  return { translateDocument, restoreOriginalBody, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
+
+test('migration button reports local-only recovery and allows retry after failure', async () => {
+  const { migrateDocumentBackups } = await setup();
+  migrateDocumentBackups.mockRejectedValueOnce(new Error('迁移失败，原备份已保留'));
+  button('compact-backups').click(); await settle();
+  expect(button('status').textContent).toContain('原备份已保留');
+  expect(button('compact-backups').disabled).toBe(false);
+  migrateDocumentBackups.mockResolvedValueOnce(true);
+  button('compact-backups').click(); await settle();
+  expect(button('status').textContent).toContain('备份不会随文件共享');
+  expect(document.body.textContent).toContain('清除站点数据');
+});
 
 test.each([true, false])('backup notice is only shown on web: %s', async web => {
   await setup('never', [], web);

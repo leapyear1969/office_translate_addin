@@ -5,6 +5,7 @@ import { translateDocument, restoreOriginalBody, Scope } from './document';
 import { loadSettings, saveSettings, WordSettings } from './settings';
 import { LANGUAGES } from '../shared/settings';
 import { isWordOnline } from './web-safety';
+import { migrateDocumentBackups } from './backup';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const target = element<HTMLSelectElement>('target-language');
@@ -32,7 +33,7 @@ const account = setupAccount(() => {
   status('已注销当前面板账户。点击头像可重新登录。');
 });
 function updateDocumentActions() {
-  ['translate-selection', 'translate-paragraph', 'translate-body', 'restore-original', 'confirm-restore'].forEach(id => {
+  ['translate-selection', 'translate-paragraph', 'translate-body', 'restore-original', 'confirm-restore', 'compact-backups'].forEach(id => {
     element<HTMLButtonElement>(id).disabled = translating || (signedOut && id.startsWith('translate'));
   });
 }
@@ -55,7 +56,7 @@ async function translateScope(scope: Scope, targetLanguage = settings.target) {
     const result = await translateDocument(scope, targetLanguage, () => !signedOut);
     status((result?.htmlBackup
       ? '翻译完成。Word 无法导出 OOXML，已使用 HTML 原文备份；可恢复文字及基本格式，复杂格式可能变化。请保存文档。'
-      : '翻译完成，原文备份已保留。保存文档后，重新打开也可恢复原文。')
+      : '翻译完成，原文备份已保存到当前浏览器。请保存文档；恢复时需使用同一浏览器和插件地址。')
       + (result?.skippedParagraphs ? `有 ${result.skippedParagraphs} 个段落因包含复杂结构或译文标记不匹配而跳过，已保留原文。` : ''));
   } catch (error) {
     status((error as Error).message, true);
@@ -115,6 +116,18 @@ async function signIn(interactive: boolean) {
 }
 
 fillLanguages(target); target.value = 'zh-Hans';
+element('compact-backups').addEventListener('click', async () => {
+  if (translating || authorizing) return;
+  translating = true;
+  updateDocumentActions();
+  status('正在将文档内备份迁移到当前浏览器…');
+  try {
+    const migrated = await migrateDocumentBackups();
+    status(migrated ? '原文备份已存入当前浏览器，文档内的旧备份已移除。请保存文档并重新下载检查大小。恢复需使用此浏览器，备份不会随文件共享。'
+      : '此文档没有需要迁移的内嵌备份。新翻译的原文仅保存在当前浏览器。');
+  } catch (error) { status((error as Error).message, true); }
+  finally { translating = false; updateDocumentActions(); }
+});
 element('restore-original').addEventListener('click', () => {
   element('restore-prompt').hidden = false;
 });

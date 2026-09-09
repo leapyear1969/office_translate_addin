@@ -1,3 +1,5 @@
+import { stripNestedBackups } from './backup-ooxml';
+
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML = 'http://www.w3.org/XML/1998/namespace';
@@ -14,7 +16,7 @@ function parse(xml: string): XMLDocument {
 /** Keep the complete local package, including image binaries and relationships.
  * Only small, generated HTML paragraphs are sent to the translation service. */
 export function prepareOoxml(xml: string) {
-  const doc = parse(xml);
+  const doc = parse(stripNestedBackups(xml));
   const main = Array.from(doc.getElementsByTagNameNS(PKG, 'part'))
     .find(part => part.getAttributeNS(PKG, 'name') === '/word/document.xml');
   const body = main?.getElementsByTagNameNS(W, 'body')[0];

@@ -4,6 +4,8 @@ import { wordPackage } from './test-fixtures/package';
 import { api, authenticate } from '../shared/api';
 import { rangeBackups, saveRangeBackups, TAG_PREFIX } from './backup';
 import { randomUUID } from 'crypto';
+import { resetIndexedDB } from './test-fixtures/indexeddb';
+import * as backupStore from './backup-store';
 jest.mock('../shared/api');
 
 const webPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
@@ -108,6 +110,8 @@ test('web rechecks after backup persistence before replacing text', async () => 
 });
 
 function setup() {
+  jest.restoreAllMocks();
+  resetIndexedDB();
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID } });
   const values = new Map<string, unknown>();
   const storage = {
@@ -164,8 +168,8 @@ test.each(['selection', 'paragraph', 'body'] as const)('backs up and translates 
   ranges[scope].ooxml = scope === 'body' ? wordPackage() : `<${scope}/>`;
   const original = ranges[scope].ooxml;
   await translateDocument(scope, 'ja');
-  expect(rangeBackups()[0].originalOoxml).toBe(original);
-  expect(rangeBackups()[0].translatedText).toBe('译文');
+  expect((await rangeBackups())[0].originalOoxml).toBe(original);
+  expect((await rangeBackups())[0].translatedText).toBe('译文');
   if (scope === 'body') {
     expect(ranges.body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining('译文'), 'Replace');
     expect(ranges.body.getHtml).not.toHaveBeenCalled();
@@ -187,7 +191,7 @@ describe.each(['selection', 'paragraph', 'body'] as const)('%s translation with 
     expect(existing.getRange).not.toHaveBeenCalled();
     expect(existing.delete).not.toHaveBeenCalled();
     expect(scope === 'body' ? ranges.body.insertOoxml : ranges[scope].insertHtml).toHaveBeenCalled();
-    expect(rangeBackups()[0].originalOoxml).toBe(scope === 'body' ? wordPackage() : '<original/>');
+    expect((await rangeBackups())[0].originalOoxml).toBe(scope === 'body' ? wordPackage() : '<original/>');
   });
 });
 
@@ -246,7 +250,7 @@ test.each(['<p id="new-export"><span>译文</span></p>', '<p><b>译文</b></p>']
 test('existing backups with a stale translated HTML snapshot remain restorable', async () => {
   const { selection, storage } = setup();
   await translateDocument('selection', 'ja');
-  const records = rangeBackups();
+  const records = (await rangeBackups());
   records[0].translatedHtml = '<p id="old-export">译文</p>';
   storage.set('wordTranslation.ranges.v2', records);
   selection.html = '<p id="new-export">译文</p>';
@@ -291,6 +295,36 @@ test('deleted controls never cause fallback to whole-document restoration', asyn
   expect(context.document.body.insertOoxml).not.toHaveBeenCalled();
 });
 
+test('cleared browser storage reports missing backups and never overwrites the translation', async () => {
+  const { selection, controls } = setup();
+  await translateDocument('selection', 'ja');
+  resetIndexedDB();
+  await expect(restoreOriginalBody()).rejects.toThrow('当前浏览器没有');
+  expect(controls[0].insertOoxml).not.toHaveBeenCalled();
+  expect(selection.text).toBe('译文');
+});
+
+test('restore reports ranges from another browser while restoring locally backed up ranges', async () => {
+  const { paragraph } = setup();
+  await translateDocument('selection', 'ja');
+  const missing = paragraph.insertContentControl();
+  missing.tag = TAG_PREFIX + 'from-another-browser';
+  const result = await restoreOriginalBody();
+  expect(result).toMatchObject({ restored: 1, skipped: 1 });
+  expect(result.details?.[0]).toContain('当前浏览器');
+  expect(missing.insertOoxml).not.toHaveBeenCalled();
+  expect(missing.delete).not.toHaveBeenCalled();
+});
+
+test('IndexedDB write failure before import never modifies document content', async () => {
+  const { selection, storage } = setup();
+  jest.spyOn(backupStore, 'accessLocalBackup').mockRejectedValueOnce(new Error('QuotaExceededError'));
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('保存翻译范围备份失败');
+  expect(selection.insertHtml).not.toHaveBeenCalled();
+  expect(selection.insertOoxml).not.toHaveBeenCalled();
+  expect(storage.set).not.toHaveBeenCalled();
+});
+
 test('duplicate tags are skipped rather than restoring the wrong copy', async () => {
   const { controls } = setup();
   await translateDocument('selection', 'ja');
@@ -311,18 +345,22 @@ test('backup persistence failure prevents replacement and permits retry', async 
   storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('保存翻译范围备份失败');
   expect(selection.insertContentControl).not.toHaveBeenCalled();
-  expect(rangeBackups()).toEqual([]);
+  expect((await rangeBackups())).toEqual([]);
   await translateDocument('selection', 'ja');
   expect(selection.insertContentControl).toHaveBeenCalledTimes(1);
 });
 
 test('checkpoint failure retains original and skips uncertain translation on restore', async () => {
-  const { storage, controls } = setup();
-  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'succeeded' }))
-    .mockImplementationOnce(cb => cb({ status: 'failed' }));
+  const { controls } = setup();
+  const access = backupStore.accessLocalBackup;
+  let writes = 0;
+  jest.spyOn(backupStore, 'accessLocalBackup').mockImplementation((id, update) => {
+    if (update && ++writes === 2) return Promise.reject(new Error('QuotaExceededError'));
+    return access(id, update);
+  });
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('译文已写入');
-  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
-  expect(rangeBackups()[0].translatedText).toBeUndefined();
+  expect((await rangeBackups())[0].originalOoxml).toBe('<original/>');
+  expect((await rangeBackups())[0].translatedText).toBeUndefined();
   const incomplete = controls[0];
   expect(await restoreOriginalBody()).toMatchObject({ restored: 0, skipped: 0, cleaned: 1 });
   expect(incomplete.insertOoxml).not.toHaveBeenCalled();
@@ -345,7 +383,7 @@ test.each(['selection', 'paragraph', 'body'] as const)('HTML export metadata cha
   });
   await translateDocument(scope, 'ja');
   expect(scope === 'body' ? ranges.body.insertOoxml : ranges[scope].insertHtml).toHaveBeenCalled();
-  expect(rangeBackups()[0].originalOoxml).toBe(scope === 'body' ? wordPackage() : '<original/>');
+  expect((await rangeBackups())[0].originalOoxml).toBe(scope === 'body' ? wordPackage() : '<original/>');
   expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
 });
 
@@ -377,13 +415,13 @@ test('empty selection, cancellation and network failure never replace content', 
   expect(selection.insertContentControl).not.toHaveBeenCalled();
 });
 
-test('failed settings write preserves previous range backups', async () => {
-  const { storage } = setup();
+test('failed local write preserves previous range backups', async () => {
+  setup();
   const original = [{ tag: TAG_PREFIX + 'one', originalOoxml: '<one/>' }];
   await saveRangeBackups(original);
-  storage.saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
+  jest.spyOn(backupStore, 'accessLocalBackup').mockRejectedValueOnce(new Error('QuotaExceededError'));
   await expect(saveRangeBackups([])).rejects.toThrow('保存');
-  expect(rangeBackups()).toEqual(original);
+  expect((await rangeBackups())).toEqual(original);
 });
 
 test.each(['ooxmlIsMalformed', 'ooxmlIsMalformated'])('OOXML export failure %s falls back to persisted range HTML', async code => {
@@ -394,8 +432,8 @@ test.each(['ooxmlIsMalformed', 'ooxmlIsMalformated'])('OOXML export failure %s f
     if (exportPending) { exportPending = false; throw Object.assign(new Error(code), { code }); }
   });
   expect(await translateDocument('selection', 'ja')).toEqual({ htmlBackup: true });
-  expect(rangeBackups()[0].originalHtml).toBe('<p>Original</p>');
-  expect(rangeBackups()[0].originalOoxml).toBeUndefined();
+  expect((await rangeBackups())[0].originalHtml).toBe('<p>Original</p>');
+  expect((await rangeBackups())[0].originalOoxml).toBeUndefined();
   body.text = 'Later edits';
   const control = controls[0];
   expect(await restoreOriginalBody()).toEqual({ restored: 1, skipped: 0 });
@@ -409,7 +447,7 @@ test('unrelated export failure does not silently downgrade the backup', async ()
   selection.getOoxml.mockImplementation(() => { throw new Error('AccessDenied'); });
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('AccessDenied');
   expect(selection.insertContentControl).not.toHaveBeenCalled();
-  expect(rangeBackups()).toEqual([]);
+  expect((await rangeBackups())).toEqual([]);
 });
 
 test('HTML fallback backup save failure still prevents translation', async () => {
@@ -430,9 +468,9 @@ test('OOXML error while inserting translation reports the write stage and does n
     }
   });
   await expect(translateDocument('selection', 'ja')).rejects.toThrow('写入译文');
-  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
-  expect(rangeBackups()[0].originalHtml).toBeUndefined();
-  expect(rangeBackups()[0].translatedText).toBeUndefined();
+  expect((await rangeBackups())[0].originalOoxml).toBe('<original/>');
+  expect((await rangeBackups())[0].originalHtml).toBeUndefined();
+  expect((await rangeBackups())[0].translatedText).toBeUndefined();
 });
 
 test('wraps the returned inserted range after import, rather than the original paragraph', async () => {
@@ -460,7 +498,7 @@ test('property failure removes the new wrapper only and reports the Word API loc
   expect(failedControl.delete).toHaveBeenCalledWith(true);
   expect(controls).toHaveLength(0);
   expect(selection.text).toBe('译文');
-  expect(rangeBackups()[0].originalOoxml).toBe('<original/>');
+  expect((await rangeBackups())[0].originalOoxml).toBe('<original/>');
 });
 
 test('retry clears an old incomplete wrapper but leaves its text and backup intact', async () => {
@@ -473,7 +511,7 @@ test('retry clears an old incomplete wrapper but leaves its text and backup inta
   await translateDocument('selection', 'ja');
   expect(old.delete).toHaveBeenCalledWith(true);
   expect(controls).not.toContain(old);
-  expect(rangeBackups()[0].originalOoxml).toBe('<old/>');
+  expect((await rangeBackups())[0].originalOoxml).toBe('<old/>');
   expect(body.text).toBe('Unrelated saved edits');
 });
 
@@ -498,7 +536,7 @@ test('incomplete legacy wrapper is cleared once without repeated skipped warning
   await saveRangeBackups([{ tag: control.tag, originalOoxml: '<original/>' }]);
   expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0, cleaned: 1 });
   expect(selection.text).toBe('Original');
-  expect(rangeBackups()).toHaveLength(1);
+  expect((await rangeBackups())).toHaveLength(1);
   expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
 });
 
@@ -529,7 +567,7 @@ test.each(['export', 'malformed', 'response', 'backup', 'cancel', 'edit', 'inser
   expect(body.getHtml).not.toHaveBeenCalled();
   expect(body.insertHtml).not.toHaveBeenCalled();
   if (failure !== 'insert') expect(body.insertOoxml).not.toHaveBeenCalled();
-  else expect(rangeBackups()[0].originalOoxml).toBe(wordPackage());
+  else expect((await rangeBackups())[0].originalOoxml).toBe(wordPackage());
 });
 
 test('layout-only edits during backup persistence are retained in the inserted full body', async () => {
@@ -563,7 +601,7 @@ test('backs up and translates the latest layout after the network request', asyn
     return { paragraphs: ['<p><span id="r0">译文</span></p>'] } as any;
   });
   await translateDocument('body', 'ja');
-  expect(rangeBackups()[0].originalOoxml).toBe(latest);
+  expect((await rangeBackups())[0].originalOoxml).toBe(latest);
   expect(body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining('bmV3'), 'Replace');
   const control = controls[0];
   await restoreOriginalBody();

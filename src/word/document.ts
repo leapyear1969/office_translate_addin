@@ -1,7 +1,8 @@
 import { api, authenticate } from '../shared/api';
-import { hasLegacyBackup, rangeBackups, saveRangeBackups, TAG_PREFIX, RangeBackup } from './backup';
+import { hasLegacyBackup, rangeBackups, saveRangeBackups, migrateDocumentBackups, TAG_PREFIX, RangeBackup } from './backup';
 import { prepareOoxml, rebaseOoxml } from './ooxml';
 import { checkWebDocument } from './web-safety';
+import { stripNestedBackups } from './backup-ooxml';
 
 export type Scope = 'selection' | 'paragraph' | 'body';
 let busy = false;
@@ -32,7 +33,7 @@ async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range) 
   await context.sync();
   // A failed operation can leave a wrapper without a committed checkpoint.
   // Remove only its wrapper, never its current contents or saved original.
-  const pending = new Set(rangeBackups().filter(record => record.translatedText === undefined).map(record => record.tag));
+  const pending = new Set((await rangeBackups()).filter(record => record.translatedText === undefined).map(record => record.tag));
   const failed = controls.items.filter(control => pending.has(control.tag));
   failed.forEach(control => control.delete(true));
   if (failed.length) await syncStep(context, '清理未完成的翻译标记');
@@ -55,6 +56,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
       const range = rangeFor(context, scope);
       context.trackedObjects.add(range);
       try {
+        await migrateDocumentBackups();
         await checkWebDocument(context);
         range.load('text');
         // Full-body translation must never round-trip the document through HTML.
@@ -111,7 +113,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
           // Do not fall back on insert errors or overwrite without a backup.
           record.originalHtml = html!.value;
         }
-        const backups = rangeBackups();
+        const backups = await rangeBackups();
         // Persist the original before any replacement. An interrupted operation
         // leaves a pending record, which restoration never applies blindly.
         await saveRangeBackups([...backups, record]);
@@ -172,12 +174,22 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
   if (busy) throw new Error('文档操作正在进行，请稍后重试。');
   busy = true;
   try {
-    const backups = rangeBackups();
-    if (!backups.length) throw new Error(hasLegacyBackup()
+    const backups = await rangeBackups();
+    if (!backups.length) throw new Error(await hasLegacyBackup()
       ? '此文档仅有旧版整篇备份，无法只恢复翻译内容。为保留编辑，已停止整篇恢复。'
-      : '当前文档没有可恢复的翻译范围备份。');
+      : '当前浏览器没有此文档的原文备份。请使用翻译时的浏览器和插件地址；清除浏览器数据后无法恢复。');
     return await Word.run(async context => {
       const result: RestoreResult = { restored: 0, skipped: 0 };
+      const allControls = context.document.contentControls;
+      allControls.load('items/tag');
+      await context.sync();
+      const known = new Set(backups.map(record => record.tag));
+      const missing = allControls.items.filter(control => typeof control.tag === 'string'
+        && control.tag.startsWith(TAG_PREFIX) && !known.has(control.tag));
+      if (missing.length) {
+        result.skipped = missing.length;
+        result.details = ['部分翻译在当前浏览器中没有原文备份，请使用翻译时的浏览器恢复'];
+      }
       // Keep records after restoration: Word Undo can bring the translated
       // control back, and its original must remain available in that case.
       for (const record of backups) {
@@ -214,7 +226,7 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
           (result.details ||= []).push('当前文字与保存的译文不一致（可能已编辑或撤销），未覆盖');
           continue;
         }
-        if (record.originalOoxml) control.insertOoxml(record.originalOoxml, Word.InsertLocation.replace);
+        if (record.originalOoxml) control.insertOoxml(stripNestedBackups(record.originalOoxml), Word.InsertLocation.replace);
         else control.insertHtml(record.originalHtml!, Word.InsertLocation.replace);
         await syncStep(context, '恢复翻译范围原文');
         control.delete(true);

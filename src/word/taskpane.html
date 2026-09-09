@@ -11,7 +11,7 @@
 <body><main>
   <header class="word-header">
     <img class="brand-icon" src="/assets/icon-80.png" width="40" height="40" alt="">
-    <div class="brand-copy"><h1>翻译</h1><p>让文档没有语言障碍</p></div>
+    <div class="brand-copy"><h1>翻译</h1></div>
     <div class="account-control">
         <button id="account-avatar" class="account-avatar" type="button" aria-label="用户账户" aria-haspopup="dialog" aria-expanded="false" aria-controls="account-menu">
           <img id="account-photo" alt="" hidden><span id="account-initial" aria-hidden="true">人</span>
@@ -37,8 +37,7 @@
     <button id="document-tab" role="tab" aria-selected="false" aria-controls="document-view" type="button"><i class="bi bi-file-earmark-text" aria-hidden="true"></i>全文</button>
   </nav>
   <section id="selection-view" role="tabpanel" aria-labelledby="translate-selection">
-    <label class="field-label" for="source-language">源语言 <i class="bi bi-question-circle" title="翻译服务自动识别原文语言。" aria-label="自动识别语言"></i></label>
-    <select id="source-language" aria-label="源语言"><option>自动检测语言</option></select>
+    <div class="field-label">源语言：自动检测</div>
     <div class="field-label source-label"><label for="source-text">原文 <span id="source-count">（0 个字符）</span></label><button id="clear-source" class="text-button" type="button"><i class="bi bi-x" aria-hidden="true"></i>清空</button></div>
     <textarea id="source-text" class="translation-text" placeholder="在 Word 中选中内容，或在此输入原文" maxlength="20000"></textarea>
     <label class="field-label target-label" for="preview-target">目标语言</label>

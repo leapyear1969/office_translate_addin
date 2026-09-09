@@ -41,6 +41,34 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   return { addHandlerAsync, captured, capturePreview, translatePreview, translateDocument, restoreOriginalBody, clearTranslationControls, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
 
+test('textarea heights survive reopening and hidden panels do not erase them', async () => {
+  const callbacks = new Map<Element, () => void>();
+  const originalObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(private callback: () => void) {}
+    observe(field: Element) { callbacks.set(field, this.callback); }
+  } as unknown as typeof ResizeObserver;
+  try {
+    localStorage.clear();
+    await setup();
+    const source = textarea('source-text');
+    const translated = textarea('translated-text');
+    source.style.height = '180px';
+    translated.style.height = '240px';
+    callbacks.get(source)!();
+    callbacks.get(translated)!();
+    button('document-tab').click();
+    callbacks.get(source)!();
+    callbacks.get(translated)!();
+    await setup();
+    expect(textarea('source-text').style.height).toBe('180px');
+    expect(textarea('translated-text').style.height).toBe('240px');
+  } finally {
+    globalThis.ResizeObserver = originalObserver;
+    localStorage.clear();
+  }
+});
+
 test('a collapsed selection shows guidance and retires the previous preview', async () => {
   const { capturePreview, captured, translatePreview } = await setup();
   button('translate-selection').click(); await settle();

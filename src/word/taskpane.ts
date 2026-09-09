@@ -30,6 +30,23 @@ let queuedPreview: (() => Promise<void>) | undefined;
 const sourceText = element<HTMLTextAreaElement>('source-text');
 const translatedText = element<HTMLTextAreaElement>('translated-text');
 const previewTarget = element<HTMLSelectElement>('preview-target');
+// Keep panel sizing local to this browser, independent of document settings.
+for (const field of [sourceText, translatedText]) {
+  const key = `word-translator.height.${field.id}`;
+  try {
+    const height = Number(localStorage.getItem(key));
+    if (Number.isFinite(height) && height > 0) field.style.height = `${height}px`;
+  } catch { /* Storage may be unavailable in the Office webview. */ }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      // Native textarea resizing sets an inline height. Ignore default layout
+      // and hidden panels so switching translation scope cannot erase it.
+      const height = parseFloat(field.style.height);
+      if (!Number.isFinite(height) || height <= 0) return;
+      try { localStorage.setItem(key, String(height)); } catch { /* Keep resizing usable. */ }
+    }).observe(field);
+  }
+}
 function invalidatePreview() {
   ++previewEpoch;
   queuedPreview = undefined;

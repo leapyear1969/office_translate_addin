@@ -12,8 +12,7 @@ i.bi{flex:none;line-height:1.2}
 .word-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .brand-icon{width:40px;height:40px;object-fit:contain}
 .brand-copy{flex:1;min-width:0}
-.brand-copy h1{font-size:20px;line-height:1.25;border:0;padding:0;margin:0 0 4px;font-weight:700}
-.brand-copy p{color:#62758e;margin:0;font-size:12px}
+.brand-copy h1{font-size:20px;line-height:1.25;border:0;padding:0;margin:0;font-weight:700}
 .icon-button{border:0;background:transparent;padding:4px;min-height:30px;width:30px;color:#465d79;font-size:16px}
 .scope-label,.field-label{display:flex;align-items:center;gap:10px;font-size:12px;margin-bottom:5px}
 .scope-label i,.field-label i{color:#647891;font-size:12px}
@@ -67,7 +66,6 @@ summary{cursor:pointer;color:#526b8b}
 #restore-prompt button{margin:6px 5px 0 0;font-size:12px}
 @media(max-width:350px){main{padding:10px}
 .brand-copy h1{font-size:20px}
-.brand-copy p{font-size:12px}
 .translation-tabs button{font-size:12px;gap:5px}
 .translation-tabs i{font-size:14px}
 .preview-footer button{font-size:12px}

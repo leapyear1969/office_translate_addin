@@ -3,6 +3,7 @@ import { hasLegacyBackup, rangeBackups, saveRangeBackups, migrateDocumentBackups
 import { prepareOoxml, rebaseOoxml } from './ooxml';
 import { checkWebDocument, isWordOnline } from './web-safety';
 import { stripNestedBackups } from './backup-ooxml';
+import { COPY_KEY, desktopBackups, isDesktopWord, prepareDesktopCopy } from './desktop-copy';
 
 export type Scope = 'selection' | 'paragraph' | 'body';
 let busy = false;
@@ -27,13 +28,13 @@ function rangeFor(context: Word.RequestContext, scope: Scope): Word.Range {
   return scope === 'paragraph' ? selection.paragraphs.getFirst().getRange() : selection;
 }
 
-async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range) {
-  const controls = context.document.contentControls;
+async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range, document: Word.Document | Word.DocumentCreated = context.document, readBackups = rangeBackups) {
+  const controls = document.contentControls;
   controls.load('items/tag');
   await context.sync();
   // A failed operation can leave a wrapper without a committed checkpoint.
   // Remove only its wrapper, never its current contents or saved original.
-  const pending = new Set((await rangeBackups()).filter(record => record.translatedText === undefined).map(record => record.tag));
+  const pending = new Set((await readBackups()).filter(record => record.translatedText === undefined).map(record => record.tag));
   const failed = controls.items.filter(control => pending.has(control.tag));
   failed.forEach(control => control.delete(true));
   if (failed.length) await syncStep(context, '清理未完成的翻译标记');
@@ -48,25 +49,30 @@ async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range) 
   }
 }
 
-export async function translateDocument(scope: Scope, target: string, shouldContinue = () => true): Promise<{ htmlBackup: boolean; skippedParagraphs?: number }> {
+export async function translateDocument(scope: Scope, target: string, shouldContinue = () => true): Promise<{ htmlBackup: boolean; skippedParagraphs?: number; desktopCopy?: boolean }> {
   if (busy) throw new Error('文档操作正在进行，请稍后重试。');
   busy = true;
   try {
     return await Word.run(async context => {
-      const range = rangeFor(context, scope);
+      const desktop = isDesktopWord() ? await prepareDesktopCopy(context, scope) : undefined;
+      const document = desktop?.document || context.document;
+      const storage = desktop ? desktopBackups(context, document) : undefined;
+      const readBackups = storage?.read || rangeBackups;
+      const saveBackups = storage?.save || saveRangeBackups;
+      const range = desktop?.range || rangeFor(context, scope);
       context.trackedObjects.add(range);
       try {
-        await migrateDocumentBackups();
+        if (!desktop) await migrateDocumentBackups();
         await checkWebDocument(context);
         range.load('text');
         // Web selections/paragraphs also retain picture resources through OOXML.
-        const nativeOoxml = scope === 'body' || isWordOnline();
+        const nativeOoxml = scope === 'body' || isWordOnline() || !!desktop;
         const html = nativeOoxml ? undefined : range.getHtml();
         await syncStep(context, '读取翻译范围');
         let originalText = range.text;
         if (!originalText.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
         if (html && html.value.length > 1000000) throw new Error('文档内容过长，请选择较小范围分次翻译。');
-        await ensureNoOverlap(context, range);
+        await ensureNoOverlap(context, range, document, readBackups);
         // Capture after retiring old pending wrappers so OOXML cannot revive them.
         const bodyOoxml = nativeOoxml ? range.getOoxml() : undefined;
         if (bodyOoxml) {
@@ -89,7 +95,7 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         }
         if (!shouldContinue()) throw new Error('已取消翻译。');
         await checkWebDocument(context);
-        await ensureNoOverlap(context, range);
+        await ensureNoOverlap(context, range, document, readBackups);
         const record: RangeBackup = { tag: TAG_PREFIX + crypto.randomUUID() };
         if (plan) {
           const latest = range.getOoxml();
@@ -114,10 +120,10 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
           // Do not fall back on insert errors or overwrite without a backup.
           record.originalHtml = html!.value;
         }
-        const backups = await rangeBackups();
+        const backups = await readBackups();
         // Persist the original before any replacement. An interrupted operation
         // leaves a pending record, which restoration never applies blindly.
-        await saveRangeBackups([...backups, record]);
+        await saveBackups([...backups, record]);
         await checkWebDocument(context);
         range.load('text');
         const currentOoxml = bodyOoxml ? range.getOoxml() : undefined;
@@ -156,15 +162,18 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         translated.load('text');
         await syncStep(context, '读取译文校验信息');
         record.translatedText = translated.text;
-        try { await saveRangeBackups([...backups, record]); }
+        try { await saveBackups([...backups, record]); }
         catch {
           throw new Error('译文已写入，但恢复校验信息保存失败。原文备份仍保留，请使用 Word 撤销本次翻译。');
         }
         return { htmlBackup: record.originalHtml !== undefined,
+          ...(desktop ? { desktopCopy: true } : {}),
           ...(translatedBody?.skippedParagraphs ? { skippedParagraphs: translatedBody.skippedParagraphs } : {}) };
       } finally {
-        context.trackedObjects.remove(range);
-        await context.sync();
+        try {
+          context.trackedObjects.remove(range);
+          await context.sync();
+        } finally { await desktop?.finish(); }
       }
     });
   } finally { busy = false; }
@@ -175,11 +184,15 @@ export async function restoreOriginalBody(): Promise<RestoreResult> {
   if (busy) throw new Error('文档操作正在进行，请稍后重试。');
   busy = true;
   try {
-    const backups = await rangeBackups();
-    if (!backups.length) throw new Error(await hasLegacyBackup()
+    const desktop = isDesktopWord();
+    if (desktop && Office.context.document.settings.get(COPY_KEY) !== true) {
+      throw new Error('请在翻译副本中打开插件并恢复原文。原始文档未进行翻译。');
+    }
+    return await Word.run(async context => {
+    const backups = desktop ? await desktopBackups(context, context.document).read() : await rangeBackups();
+    if (!backups.length) throw new Error(desktop ? '此副本没有可恢复的翻译备份。' : await hasLegacyBackup()
       ? '此文档仅有旧版整篇备份，无法只恢复翻译内容。为保留编辑，已停止整篇恢复。'
       : '当前浏览器没有此文档的原文备份。请使用翻译时的浏览器和插件地址；清除浏览器数据后无法恢复。');
-    return await Word.run(async context => {
       const result: RestoreResult = { restored: 0, skipped: 0 };
       const allControls = context.document.contentControls;
       allControls.load('items/tag');

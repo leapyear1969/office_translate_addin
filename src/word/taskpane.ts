@@ -6,6 +6,7 @@ import { loadSettings, saveSettings, WordSettings } from './settings';
 import { LANGUAGES } from '../shared/settings';
 import { isWordOnline } from './web-safety';
 import { migrateDocumentBackups } from './backup';
+import { isDesktopWord } from './desktop-copy';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const target = element<HTMLSelectElement>('target-language');
@@ -51,10 +52,12 @@ async function translateScope(scope: Scope, targetLanguage = settings.target) {
   translating = true;
   updateDocumentActions();
   element('restore-prompt').hidden = true;
-  status(isWordOnline() ? '正在检查文档是否适合网页版翻译…' : '正在翻译文档内容…');
+  status(isWordOnline() ? '正在检查文档是否适合网页版翻译…' : '正在准备翻译副本并翻译…');
   try {
     const result = await translateDocument(scope, targetLanguage, () => !signedOut);
-    status((result?.htmlBackup
+    status((result?.desktopCopy
+      ? '翻译已在副本中完成。请保存副本；后续翻译和恢复请在副本中打开插件操作，原文备份随副本保存。'
+      : result?.htmlBackup
       ? '翻译完成。Word 无法导出 OOXML，已使用 HTML 原文备份；可恢复文字及基本格式，复杂格式可能变化。请保存文档。'
       : '翻译完成，原文备份已保存到当前浏览器。请保存文档；恢复时需使用同一浏览器和插件地址。')
       + (result?.skippedParagraphs ? `有 ${result.skippedParagraphs} 个段落因包含复杂结构或译文标记不匹配而跳过，已保留原文。` : ''));
@@ -181,6 +184,11 @@ Office.actions.associate('translateSelectionChinese', async (event: Office.Addin
 Office.onReady(async info => {
   if (info.host !== Office.HostType.Word) return;
   element('web-backup-notice').hidden = !isWordOnline();
+  element('desktop-copy-notice').hidden = !isDesktopWord();
+  if (isDesktopWord()) {
+    element('compact-backups').hidden = true;
+    element('backup-notice').textContent = '桌面端先创建翻译副本，再在副本中翻译。请保存副本，原文备份随副本保存；后续翻译和恢复请在副本中打开插件操作。恢复时保留范围外的编辑，文字已修改的译文会跳过。';
+  }
   settings = loadSettings();
   target.value = settings.target;
   updateDocumentActions();

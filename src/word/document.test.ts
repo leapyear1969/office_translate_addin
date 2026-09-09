@@ -8,7 +8,49 @@ import { resetIndexedDB } from './test-fixtures/indexeddb';
 import * as backupStore from './backup-store';
 import { picture, withPictureParts } from './test-fixtures/pictures';
 import { listParagraph, withNumbering } from './test-fixtures/lists';
+import { COPY_KEY } from './desktop-copy';
 jest.mock('../shared/api');
+
+function setupDesktop() {
+  const ranges = setup();
+  const values = new Map<string, unknown>();
+  const copy: any = { ...ranges.context.document, open: jest.fn(), settings: {
+    add: jest.fn((key: string, value: unknown) => values.set(key, JSON.parse(JSON.stringify(value)))),
+    getItemOrNullObject: (key: string) => ({ load: jest.fn(), isNullObject: !values.has(key), value: values.get(key) }),
+  } };
+  const original: any = { body: { getRange: () => ({ text: 'Original', load: jest.fn() }) } };
+  ranges.context.document = original;
+  (ranges.context as any).application = { createDocument: jest.fn(() => copy) };
+  Object.assign(Office, { PlatformType: { PC: 'PC', Mac: 'Mac', OfficeOnline: 'OfficeOnline' }, FileType: { Compressed: 'compressed' } });
+  Object.assign(Office.context, { platform: 'PC', requirements: { isSetSupported: () => true } });
+  Object.assign(Office.context.document, { getFileAsync: (_type: unknown, _opts: unknown, cb: Function) => cb({ status: 'succeeded', value: {
+    sliceCount: 1, getSliceAsync: (_i: number, done: Function) => done({ status: 'succeeded', value: { data: [1, 2, 3] } }),
+    closeAsync: (done: Function) => done({ status: 'succeeded' }),
+  } }) });
+  return { ...ranges, copy, original, values };
+}
+
+test('desktop writes only the copy, persists its backup, and restores after reopening its pane', async () => {
+  const ranges = setupDesktop();
+  await expect(translateDocument('body', 'ja')).resolves.toEqual({ htmlBackup: false, desktopCopy: true });
+  expect(ranges.copy.open).toHaveBeenCalledTimes(1);
+  expect(ranges.storage.saveAsync).not.toHaveBeenCalled();
+  expect(ranges.values.get('wordTranslation.ranges.v2')).toEqual([expect.objectContaining({ translatedText: '译文' })]);
+  await expect(restoreOriginalBody()).rejects.toThrow('请在翻译副本');
+  ranges.context.document = ranges.copy;
+  ranges.storage.set(COPY_KEY, true);
+  await expect(restoreOriginalBody()).resolves.toEqual({ restored: 1, skipped: 0 });
+  expect(ranges.body.text).toBe('Original');
+});
+
+test('desktop opens the untranslated copy on service failure without writing translation', async () => {
+  const ranges = setupDesktop();
+  jest.mocked(api).mockRejectedValueOnce(new Error('service failed'));
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('service failed');
+  expect(ranges.copy.open).toHaveBeenCalledTimes(1);
+  expect(ranges.body.insertOoxml).not.toHaveBeenCalled();
+  expect(ranges.storage.saveAsync).not.toHaveBeenCalled();
+});
 
 const webPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
   wordPackage(content).replace('<w:cols w:num="2"/>', '').replace(/<pkg:part pkg:name="\/word\/media\/image1.png">[\s\S]*?<\/pkg:part>/, '');

@@ -349,11 +349,6 @@ Office.onReady(async info => {
 });
 
 element('dismiss-status').addEventListener('click', () => status(''));
-element('open-settings').addEventListener('click', () => {
-  const panel = element('settings-panel');
-  panel.hidden = !panel.hidden;
-  element('open-settings').setAttribute('aria-expanded', String(!panel.hidden));
-});
 element('copy-translation').addEventListener('click', async () => {
   if (!translatedText.value) { status('暂无可复制的译文。'); return; }
   try { await navigator.clipboard.writeText(translatedText.value); status('译文已复制'); }

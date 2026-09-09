@@ -10,12 +10,9 @@
 </head>
 <body><main>
   <header class="word-header">
-    <img class="brand-icon" src="/assets/icon-80.png" width="56" height="56" alt="">
+    <img class="brand-icon" src="/assets/icon-80.png" width="40" height="40" alt="">
     <div class="brand-copy"><h1>翻译</h1><p>让文档没有语言障碍</p></div>
-    <button id="open-settings" class="icon-button" type="button" aria-label="设置" title="设置"><i class="bi bi-gear" aria-hidden="true"></i></button>
-  </header>
-  <section id="settings-panel" hidden aria-label="账户与高级设置">
-      <div class="account-control">
+    <div class="account-control">
         <button id="account-avatar" class="account-avatar" type="button" aria-label="用户账户" aria-haspopup="dialog" aria-expanded="false" aria-controls="account-menu">
           <img id="account-photo" alt="" hidden><span id="account-initial" aria-hidden="true">人</span>
         </button>
@@ -30,14 +27,7 @@
           </div>
         </section>
       </div>
-
-    <p class="hint">账户与文档维护</p>
-    <button id="compact-backups" type="button" disabled>将旧备份移到此浏览器</button>
-    <details><summary>翻译与备份说明</summary>    <p id="web-backup-notice" class="hint" hidden><strong>翻译前自动检查并备份原文：</strong>符合要求后直接翻译当前文档。支持文字、基本格式、普通表格（包括空表格）和普通图片；图片保留，图片内部文字不翻译。嵌套表格、合并单元格、文本框或 SmartArt 等复杂结构，或超过 20000 个文字字符、500 个段落、5 MB 结构数据的文档，请使用桌面 Word 客户端打开并翻译。正文全文翻译包含正文表格中的文字，页眉和页脚保持原样。</p>
-    <p id="desktop-copy-notice" class="hint" hidden>全文翻译每次创建完整文档的新副本，并在副本中翻译。完成后打开副本，请保存；翻译失败时也会打开副本供检查。</p>
-    <p id="backup-notice" class="hint">原文备份仅保存在当前浏览器，不随文件共享。恢复需使用同一浏览器配置和插件地址；更换设备、浏览器、使用隐私模式或清除站点数据后可能无法恢复。桌面 Word 与网页版的备份也不互通。请另存原文件副本。恢复该范围的原文及原格式，范围外的编辑会保留；译文文字已修改时跳过。重叠范围需先恢复原文，或清除翻译控件并保留译文后再翻译。</p>
-</details>
-  </section>
+  </header>
     <p id="browser-consent" hidden>如果浏览器没有打开，请<a id="browser-consent-link" target="_blank" rel="noopener noreferrer">点击此处继续授权</a>，或复制链接到默认浏览器。授权完成后请关闭浏览器窗口，并重新打开插件。</p>
 
   <div class="scope-label">翻译范围 <i class="bi bi-question-circle" title="选中内容和当前段落提供译文预览；全文翻译整个文档。" aria-label="范围说明"></i></div>
@@ -77,6 +67,14 @@
       <section class="document-card"><h2><i class="bi bi-globe2" aria-hidden="true"></i>目标语言</h2><label for="target-language" class="muted">将文档翻译为：</label><select id="target-language" name="target"></select></section>
       <section class="document-card"><h2><i class="bi bi-gear" aria-hidden="true"></i>保存设置</h2><p id="settings-description" class="hint">保存当前文档的翻译设置，原文备份随副本保存。</p><button class="primary save-button" type="submit" id="save"><i class="bi bi-floppy" aria-hidden="true"></i>保存设置</button></section>
     </fieldset></form>
+    <details class="document-maintenance"><summary>文档维护与备份说明</summary>
+
+
+    <button id="compact-backups" type="button" disabled>将旧备份移到此浏览器</button>
+    <p id="web-backup-notice" class="hint" hidden><strong>翻译前自动检查并备份原文：</strong>符合要求后直接翻译当前文档。支持文字、基本格式、普通表格（包括空表格）和普通图片；图片保留，图片内部文字不翻译。嵌套表格、合并单元格、文本框或 SmartArt 等复杂结构，或超过 20000 个文字字符、500 个段落、5 MB 结构数据的文档，请使用桌面 Word 客户端打开并翻译。正文全文翻译包含正文表格中的文字，页眉和页脚保持原样。</p>
+    <p id="desktop-copy-notice" class="hint" hidden>全文翻译每次创建完整文档的新副本，并在副本中翻译。完成后打开副本，请保存；翻译失败时也会打开副本供检查。</p>
+    <p id="backup-notice" class="hint">原文备份仅保存在当前浏览器，不随文件共享。恢复需使用同一浏览器配置和插件地址；更换设备、浏览器、使用隐私模式或清除站点数据后可能无法恢复。桌面 Word 与网页版的备份也不互通。请另存原文件副本。恢复该范围的原文及原格式，范围外的编辑会保留；译文文字已修改时跳过。重叠范围需先恢复原文，或清除翻译控件并保留译文后再翻译。</p>
+    </details>
   </section>
   <section id="notification" class="notification" role="status" aria-live="polite" hidden>
     <i id="status-icon" class="bi bi-check-circle-fill" aria-hidden="true"></i>

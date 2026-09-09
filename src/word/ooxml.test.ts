@@ -176,9 +176,42 @@ test('rebases onto the latest export including metadata, relationship IDs, layou
 });
 
 test('rebase rejects changed text even in skipped paragraphs', () => {
-  const original = wordPackage(paragraph('Safe') + '<w:p><w:hyperlink><w:r><w:t>Link</w:t></w:r></w:hyperlink></w:p>');
+  const original = wordPackage(paragraph('Safe') + '<w:p><w:fldSimple w:instr="REF target"><w:r><w:t>Link</w:t></w:r></w:fldSimple></w:p>');
   expect(() => rebaseOoxml(prepareOoxml(original), original.replace('Link', 'Edited'), ['<p><span id="r0">译文</span></p>']))
     .toThrow('正文文字已更改');
+});
+
+test('translates linked paragraphs with proofing and rendered page markers without altering other XML', () => {
+  const original = wordPackage('<w:p><w:r><w:t>Starting today, </w:t></w:r><w:proofErr w:type="spellStart"/>'
+    + '<w:hyperlink xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId7" w:history="1"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>Managed Agents</w:t></w:r></w:hyperlink>'
+    + '<w:proofErr w:type="spellEnd"/><w:r><w:lastRenderedPageBreak/><w:t> connect to services.</w:t></w:r></w:p>')
+    .replace('</pkg:package>', '<pkg:part pkg:name="/word/_rels/document.xml.rels"><pkg:xmlData><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId7" Target="https://example.com/agents" TargetMode="External" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"/></Relationships></pkg:xmlData></pkg:part></pkg:package>');
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">Starting today, </span><span id="r1">Managed Agents</span><span id="r2"> connect to services.</span></p>']);
+  const result = plan.apply(['<p><span id="r0">即日起，</span><span id="r1">托管代理</span><span id="r2">可以连接服务。</span></p>']);
+  expect(result.skippedParagraphs).toBe(0);
+  const before = parse(original), after = parse(result.ooxml);
+  expect(after.getElementsByTagNameNS(W, 'hyperlink')[0].textContent).toBe('托管代理');
+  for (const doc of [before, after]) for (const node of Array.from(doc.getElementsByTagNameNS(W, 't'))) {
+    node.textContent = ''; node.removeAttributeNS('http://www.w3.org/XML/1998/namespace', 'space');
+  }
+  expect(serialize(after)).toBe(serialize(before));
+});
+
+test('rebasing preserves updated link targets but rejects changed clickable boundaries', () => {
+  const original = wordPackage('<w:p><w:hyperlink w:anchor="old"><w:r><w:t>Link</w:t></w:r></w:hyperlink><w:r><w:t>Text</w:t></w:r></w:p>');
+  const plan = prepareOoxml(original);
+  const translated = ['<p><span id="r0">链接</span><span id="r1">文字</span></p>'];
+  expect(rebaseOoxml(plan, original.replace('w:anchor="old"', 'w:anchor="new"'), translated).ooxml).toContain('w:anchor="new"');
+  expect(() => rebaseOoxml(plan, original.replace('</w:hyperlink><w:r>', '<w:r>').replace('</w:p>', '</w:hyperlink></w:p>'), translated)).toThrow('文字分段');
+});
+
+test('hyperlinks containing fields or revisions still retain their original text', () => {
+  const original = wordPackage(paragraph('Safe') + '<w:p><w:hyperlink><w:ins><w:r><w:t>Revision</w:t></w:r></w:ins></w:hyperlink></w:p>'
+    + '<w:p><w:hyperlink><w:r><w:fldChar w:fldCharType="begin"/><w:t>Field</w:t><w:fldChar w:fldCharType="end"/></w:r></w:hyperlink></w:p>');
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">Safe</span></p>']);
+  expect(plan.apply(['<p><span id="r0">安全</span></p>']).skippedParagraphs).toBe(2);
 });
 
 test('rebase rejects changed run mapping instead of applying formatted text to wrong runs', () => {

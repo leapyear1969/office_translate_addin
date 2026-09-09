@@ -60,7 +60,7 @@ export function prepareOoxml(xml: string) {
           || parent.getElementsByTagNameNS(W, 'lock').length) unsafe = true;
       }
     }
-    // Fields, revisions and hyperlinks can carry
+    // Fields and revisions can carry
     // semantics that cannot safely be mapped to reordered translated runs.
     const runs: Element[] = [];
     // Walk ordinary inline template controls without flattening their XML.
@@ -69,6 +69,8 @@ export function prepareOoxml(xml: string) {
       for (const child of Array.from(container.children)) {
         if (child.namespaceURI !== W) { unsafe = true; continue; }
         if (child.localName === 'r') runs.push(child);
+        else if (child.localName === 'hyperlink') collectRuns(child);
+        else if (child.localName === 'proofErr') continue;
         else if (child.localName === 'sdt') {
           const content = Array.from(child.children).find(node => node.namespaceURI === W && node.localName === 'sdtContent');
           if (!content || child.getElementsByTagNameNS(W, 'dataBinding').length
@@ -79,7 +81,7 @@ export function prepareOoxml(xml: string) {
     }
     collectRuns(paragraph);
     if (runs.some(run => Array.from(run.children).some(child => !isPictureDrawing(child) && !isSeparator(child)
-      && (child.namespaceURI !== W || !['rPr', 't'].includes(child.localName))))) unsafe = true;
+      && (child.namespaceURI !== W || !['rPr', 't', 'lastRenderedPageBreak'].includes(child.localName))))) unsafe = true;
     if (unsafe) { skipped++; continue; }
     // Keep pictures, manual breaks and tabs in place, translating each side
     // independently even when text and a separator share a single run.
@@ -105,10 +107,19 @@ export function prepareOoxml(xml: string) {
   }
   if (!segments.length) throw new Error(`没有可安全翻译的正文段落${skipped ? `，${skipped} 个复杂段落已保留原文` : ''}。`);
   if (segments.reduce((total, segment) => total + segment.html.length, 0) > 1000000) throw new Error('文档文字过长，请分次翻译。');
+  const links = Array.from(body.getElementsByTagNameNS(W, 'hyperlink'));
+  function linkBoundary(node: Element): number {
+    for (let parent = node.parentElement; parent && parent !== body; parent = parent.parentElement) {
+      if (parent.namespaceURI === W && parent.localName === 'hyperlink') return links.indexOf(parent);
+    }
+    return -1;
+  }
   return {
     paragraphs: segments.map(segment => segment.html),
     sourceText: JSON.stringify(sourceParagraphs),
-    mapping: JSON.stringify(segments.map(segment => [segment.index, segment.nodes.map(node => node.textContent || '')])),
+    // Link addresses may change while awaiting the service; preserve the latest
+    // address, but reject changes to which words belong to a clickable range.
+    mapping: JSON.stringify(segments.map(segment => [segment.index, segment.nodes.map(node => node.textContent || ''), segment.nodes.map(linkBoundary)])),
     apply(translations: unknown) {
       if (!Array.isArray(translations) || translations.length !== segments.length
         || translations.some(value => typeof value !== 'string')

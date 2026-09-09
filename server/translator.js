@@ -102,10 +102,12 @@ function createTranslator(config) {
         if (values.length !== batch.length || values.some(value => typeof value !== 'string' || !value.trim())) throw new Error('翻译结果不完整');
         for (let index = 0; index < values.length; index++) {
           let value = values[index];
-          if (!hasWordMarkers(batch[index], value)) {
+          if (!hasWordMarkers(batch[index], value) || hasUntranslatedProse(batch[index], value)) {
             // HTML translation can move words outside spans, empty linked
             // spans or reorder them. Retry only this paragraph as plain text
-            // fragments and rebuild its original markup locally.
+            // fragments and rebuild its original markup locally. Mixed-language
+            // paragraphs can also return unchanged when the provider detects
+            // the target language for the entire paragraph.
             value = await translateHtml(batch[index], to, async texts => {
               if (Date.now() - started > 75000) throw new Error('全文翻译超时');
               const retry = await call('translate', texts, to);
@@ -130,6 +132,20 @@ function createTranslator(config) {
       return { language: result.language, score: result.score };
     }),
   };
+}
+
+function hasUntranslatedProse(source, translated) {
+  const options = { xml: { xmlMode: false, decodeEntities: true } };
+  const original = cheerio.load(source, options);
+  const result = cheerio.load(translated, options);
+  const returned = new Map(result('p > span').toArray().map(span => [span.attribs.id, result(span).text().trim()]));
+  return original('p > span').toArray().some(span => {
+    const text = original(span).text().trim();
+    // Retry substantial unchanged prose, not isolated names such as Microsoft
+    // Azure. This is a bounded retry, not a claim that all Latin text is wrong.
+    const words = text.match(/\p{L}+/gu) || [];
+    return words.length >= 5 && words.join('').length >= 40 && returned.get(span.attribs.id) === text;
+  });
 }
 
 // Match the client's fail-closed mapping contract before returning paragraphs.

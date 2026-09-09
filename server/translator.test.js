@@ -51,6 +51,22 @@ describe('Word paragraph translation', () => {
     await expect(service().translateWord(['<p><span id="r0">Original</span></p>'], 'zh-Hans')).rejects.toThrow('格式标记');
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
+  test('retries unchanged prose in mixed-language paragraphs with valid markers', async () => {
+    const english = 'Built on the cloud ecosystem, our company connects services and supports collaboration.';
+    const source = `<p><span id="r0">${english}</span><span id="r1">已有中文内容。</span></p>`;
+    global.fetch = jest.fn(async url => ({ ok: true, json: async () =>
+      (url.searchParams.get('textType') === 'html' ? [source] : ['基于云生态系统，公司连接服务并支持协作。', '已有中文内容。'])
+        .map(text => ({ translations: [{ text }] })),
+    }));
+    expect(await service().translateWord([source], 'zh-Hans')).toEqual(['<p><span id="r0">基于云生态系统，公司连接服务并支持协作。</span><span id="r1">已有中文内容。</span></p>']);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+  test('does not retry unchanged product names', async () => {
+    const source = '<p><span id="r0">Microsoft Azure</span><span id="r1">Power Platform</span></p>';
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => [{ translations: [{ text: source }] }] }));
+    expect(await service().translateWord([source], 'zh-Hans')).toEqual([source]);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('mail HTML translation', () => {

@@ -60,8 +60,6 @@ i.bi{flex:none;line-height:1.2}
 .document-actions i{font-size:16px}
 .document-card select{margin-top:7px}
 .document-card .hint{color:#647891;margin:0 0 10px}
-.save-button{width:100%}
-.save-button i{font-size:16px}
 details{margin-top:12px}
 summary{cursor:pointer;color:#526b8b}
 #translation-menu{position:absolute;top:43px;right:6px;background:white;box-shadow:0 3px 14px #14284126;padding:5px;border-radius:5px;z-index:2}

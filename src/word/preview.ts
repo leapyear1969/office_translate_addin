@@ -1,6 +1,13 @@
 import { api, authenticate } from '../shared/api';
 import { prepareOoxml } from './ooxml';
 
+export class EmptySelectionError extends Error {
+  constructor() {
+    super('请先选中需要翻译的文字，或在原文框中输入内容。');
+    this.name = 'EmptySelectionError';
+  }
+}
+
 export interface PreviewRange {
   text: string;
   insert(text: string, shouldContinue: () => boolean): Promise<void>;
@@ -12,8 +19,10 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
   return Word.run(async context => {
     const selection = context.document.getSelection();
     const range = scope === 'paragraph' ? selection.paragraphs.getFirst().getRange() : selection;
-    range.load('text');
+    range.load('text,isEmpty');
     await context.sync();
+    // A collapsed cursor has no OOXML to translate; some hosts throw when asked for it.
+    if (scope === 'selection' && range.isEmpty) throw new EmptySelectionError();
     const original = range.text;
     let placeholderPlan: ReturnType<typeof prepareOoxml> | undefined;
     let text = original;

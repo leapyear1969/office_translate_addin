@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
-import { capturePreview, translatePreview } from './preview';
+import { capturePreview, translatePreview, EmptySelectionError } from './preview';
 import { api, authenticate } from '../shared/api';
 import { wordPackage } from './test-fixtures/package';
 jest.mock('../shared/api');
 
 function setup() {
-  const range = { text: 'Original', load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })) };
+  const range = { text: 'Original', isEmpty: false, load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })) };
   const selection = { ...range, paragraphs: { getFirst: () => ({ getRange: () => range }) } };
   const context = { document: { getSelection: jest.fn(() => selection) }, sync: jest.fn(async () => {}),
     trackedObjects: { add: jest.fn(), remove: jest.fn() } };
@@ -41,6 +41,16 @@ test('empty selections are rejected without retaining a Word range', async () =>
   const { selection, context } = setup();
   selection.text = '';
   await expect(capturePreview('selection')).rejects.toThrow('请先选中');
+  expect(context.trackedObjects.add).not.toHaveBeenCalled();
+});
+
+test('a collapsed cursor returns guidance without requesting OOXML that can throw GeneralException', async () => {
+  const { selection, context } = setup();
+  selection.text = '';
+  selection.isEmpty = true;
+  selection.getOoxml.mockImplementation(() => { throw new Error('GeneralException'); });
+  await expect(capturePreview('selection')).rejects.toBeInstanceOf(EmptySelectionError);
+  expect(selection.getOoxml).not.toHaveBeenCalled();
   expect(context.trackedObjects.add).not.toHaveBeenCalled();
 });
 

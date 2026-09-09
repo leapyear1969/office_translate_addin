@@ -7,7 +7,7 @@ import { LANGUAGES } from '../shared/settings';
 import { isWordOnline } from './web-safety';
 import { migrateDocumentBackups } from './backup';
 import { isDesktopWord } from './desktop-copy';
-import { capturePreview, translatePreview, PreviewRange } from './preview';
+import { capturePreview, translatePreview, PreviewRange, EmptySelectionError } from './preview';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const target = element<HTMLSelectElement>('target-language');
@@ -16,7 +16,6 @@ let activeScope: 'selection' | 'paragraph' = 'selection';
 let session: Session | undefined;
 let loginEpoch = 0;
 let translating = false;
-let dirty = false;
 let authorizing = false;
 let visible = false;
 let initialized = false;
@@ -87,7 +86,15 @@ async function openPreview(scope: 'selection' | 'paragraph', language: string) {
     status('');
     schedulePreview(true);
   } catch (error) {
-    if (epoch === previewEpoch) status((error as Error).message, true);
+    if (epoch !== previewEpoch) return;
+    if (error instanceof EmptySelectionError) {
+      sourceText.value = '';
+      element('source-count').textContent = '（0 个字符）';
+      status(error.message);
+      await releasePreview().catch(() => {});
+    } else {
+      status((error as Error).message, true);
+    }
   }
 }
 function showView(fullDocument: boolean) {
@@ -136,8 +143,6 @@ function status(message: string, error = false, repairFailed = false) {
 function fillLanguages(select: HTMLSelectElement) {
   Object.entries(LANGUAGES).forEach(([code, label]) => select.add(new Option(label, code)));
 }
-function markDirty() { dirty = true; status('尚未保存'); }
-function currentForm(): WordSettings { return { target: target.value }; }
 async function translateScope(scope: Scope, targetLanguage = settings.target) {
   if (translating || authorizing || signedOut) return;
   if (scope !== 'body') { await openPreview(scope, targetLanguage); return; }
@@ -284,18 +289,20 @@ element('confirm-restore').addEventListener('click', async () => {
   finally { translating = false; updateDocumentActions(); }
 });
 element('signin').addEventListener('click', () => void signIn(true));
-target.addEventListener('change', markDirty);
-element('preferences').addEventListener('submit', async event => {
-  event.preventDefault();
-  if (!dirty) { status('设置已保存'); return; }
+target.addEventListener('change', async () => {
   const fields = element<HTMLFieldSetElement>('settings-fields');
   fields.disabled = true;
+  const previous = settings;
+  const next = { target: target.value };
+  settings = next;
   try {
-    const next = currentForm();
-    await saveSettings(next); settings = next; dirty = false;
+    await saveSettings(next);
     updateDocumentActions();
-    status('设置已保存');
-  } catch (error) { status((error as Error).message, true); }
+  } catch (error) {
+    settings = previous;
+    target.value = previous.target;
+    status((error as Error).message, true);
+  }
   finally { fields.disabled = false; }
 });
 (['selection', 'paragraph', 'body'] as Scope[]).forEach(scope => {
@@ -317,7 +324,6 @@ Office.onReady(async info => {
   if (isWordOnline()) {
     element('document-summary').textContent = '将检查并备份原文，然后翻译当前文档。';
     element('document-detail').textContent = '完成后请保存文档；恢复原文需使用同一浏览器和插件地址。';
-    element('settings-description').textContent = '保存当前文档的翻译设置，原文备份保存在当前浏览器。';
   }
   element('web-backup-notice').hidden = !isWordOnline();
   element('desktop-copy-notice').hidden = !isDesktopWord();

@@ -12,7 +12,7 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   const captured = { text: 'Original text', insert: jest.fn(async () => {}), release: jest.fn(async () => {}) };
   const capturePreview = jest.fn(async () => captured);
   const translatePreview = jest.fn(async () => 'Translated text');
-  jest.doMock('./preview', () => ({ capturePreview, translatePreview }));
+  jest.doMock('./preview', () => ({ ...jest.requireActual('./preview'), capturePreview, translatePreview }));
   const restoreOriginalBody = jest.fn(async () => ({ restored: 1, skipped: 0 }));
   const clearTranslationControls = jest.fn(async () => 2);
   const migrateDocumentBackups = jest.fn(async () => false);
@@ -40,6 +40,25 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
   return { addHandlerAsync, captured, capturePreview, translatePreview, translateDocument, restoreOriginalBody, clearTranslationControls, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
+
+test('a collapsed selection shows guidance and retires the previous preview', async () => {
+  const { capturePreview, captured, translatePreview } = await setup();
+  button('translate-selection').click(); await settle();
+  const { EmptySelectionError } = require('./preview');
+  capturePreview.mockRejectedValueOnce(new EmptySelectionError());
+  translatePreview.mockClear();
+  button('translate-selection').click(); await settle();
+  expect(button('notification').classList.contains('info')).toBe(true);
+  expect(button('status').textContent).toBe('请先选中需要翻译的文字，或在原文框中输入内容。');
+  expect(textarea('source-text').value).toBe('');
+  expect(textarea('translated-text').value).toBe('');
+  expect(button('source-count').textContent).toBe('（0 个字符）');
+  expect(captured.release).toHaveBeenCalledTimes(1);
+  expect(button('insert-translation').disabled).toBe(true);
+  expect(translatePreview).not.toHaveBeenCalled();
+  button('translate-selection').click(); await settle();
+  expect(button('insert-translation').disabled).toBe(false);
+});
 
 test('clear controls releases the preview, reports failures and permits retry without authentication', async () => {
   const { clearTranslationControls, captured, authenticate } = await setup();
@@ -111,7 +130,7 @@ test.each(['always', 'ask', 'never'])('legacy %s settings never detect, prompt o
   button('signin').click(); await settle();
   const target = document.getElementById('target-language') as HTMLSelectElement;
   target.value = 'en'; target.dispatchEvent(new Event('change', { bubbles: true }));
-  button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
+  await settle();
   expect(savedSettings()).toEqual({ target: 'en' });
   expect(api).not.toHaveBeenCalled();
   expect(translateDocument).not.toHaveBeenCalled();
@@ -127,11 +146,11 @@ test('failed settings save keeps the previous target and allows retry', async ()
   saveAsync.mockImplementationOnce(cb => cb({ status: 'failed' }));
   const target = document.getElementById('target-language') as HTMLSelectElement;
   target.value = 'en'; target.dispatchEvent(new Event('change', { bubbles: true }));
-  button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
+  await settle();
   expect(button('status').textContent).toContain('保存设置失败');
   button('translate-selection').click(); await settle();
   expect(translatePreview).toHaveBeenLastCalledWith('Original text', 'ja');
-  button('preferences').dispatchEvent(new Event('submit', { cancelable: true })); await settle();
+  target.value = 'en'; target.dispatchEvent(new Event('change', { bubbles: true })); await settle();
   button('translate-selection').click(); await settle();
   expect(translatePreview).toHaveBeenLastCalledWith('Original text', 'en');
 });

@@ -2,6 +2,7 @@ import type { Scope } from './document';
 import type { RangeBackup } from './backup';
 import { DOCUMENT_ID_KEY } from './backup';
 import { accessLocalBackup } from './backup-store';
+import { prepareOoxml } from './ooxml';
 
 export const COPY_KEY = 'wordTranslation.desktopCopy.v1';
 const BACKUPS_KEY = 'wordTranslation.ranges.v2';
@@ -59,7 +60,12 @@ export async function prepareDesktopCopy(context: Word.RequestContext, scope: Sc
   const range = scope === 'paragraph' ? selection.paragraphs.getFirst().getRange() : selection;
   range.load('text');
   await context.sync();
-  if (!range.text.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
+  let placeholderPlan: ReturnType<typeof prepareOoxml> | undefined;
+  if (!range.text.trim()) {
+    const native = range.getOoxml();
+    await context.sync();
+    placeholderPlan = prepareOoxml(native.value);
+  }
   if (scope !== 'body' && Office.context.document.settings.get(COPY_KEY) === true) {
     return { document: source as Word.Document | Word.DocumentCreated, range, created: false, finish: async () => {} };
   }
@@ -98,6 +104,14 @@ export async function prepareDesktopCopy(context: Word.RequestContext, scope: Sc
     await context.sync();
     if (scope !== 'body') { copy.deleteBookmark(bookmark); await context.sync(); }
     if (copiedRange.text !== range.text) throw new Error('副本中的翻译范围与原文不一致，已停止翻译。');
+    if (placeholderPlan) {
+      const native = copiedRange.getOoxml();
+      await context.sync();
+      const copiedPlan = prepareOoxml(native.value);
+      if (copiedPlan.sourceText !== placeholderPlan.sourceText || copiedPlan.mapping !== placeholderPlan.mapping) {
+        throw new Error('副本中的翻译范围与原文不一致，已停止翻译。');
+      }
+    }
     return { document: copy as Word.Document | Word.DocumentCreated, range: copiedRange, created: true,
       finish: async () => { copy.open(); await context.sync(); } };
   } catch (error) {

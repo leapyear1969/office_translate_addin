@@ -70,7 +70,9 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         const html = nativeOoxml ? undefined : range.getHtml();
         await syncStep(context, '读取翻译范围');
         let originalText = range.text;
-        if (!originalText.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
+        // Placeholder-only templates can expose empty Range.text. Let the
+        // native parser determine whether their OOXML contains usable text.
+        if (!originalText.trim() && !nativeOoxml) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
         if (html && html.value.length > 1000000) throw new Error('文档内容过长，请选择较小范围分次翻译。');
         await ensureNoOverlap(context, range, document, readBackups);
         // Capture after retiring old pending wrappers so OOXML cannot revive them.

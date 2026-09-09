@@ -1,10 +1,11 @@
 /** @jest-environment jsdom */
 import { capturePreview, translatePreview } from './preview';
 import { api, authenticate } from '../shared/api';
+import { wordPackage } from './test-fixtures/package';
 jest.mock('../shared/api');
 
 function setup() {
-  const range = { text: 'Original', load: jest.fn(), insertText: jest.fn() };
+  const range = { text: 'Original', load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })) };
   const selection = { ...range, paragraphs: { getFirst: () => ({ getRange: () => range }) } };
   const context = { document: { getSelection: jest.fn(() => selection) }, sync: jest.fn(async () => {}),
     trackedObjects: { add: jest.fn(), remove: jest.fn() } };
@@ -48,4 +49,19 @@ test('preview preserves literal markup and newlines as text', async () => {
   jest.mocked(api).mockResolvedValue({ html: '<div>&lt;b&gt;译文&lt;/b&gt;\n第二行 &amp; 第三行</div>' });
   expect(await translatePreview('<b>source</b>\nnext & last', 'en')).toBe('<b>译文</b>\n第二行 & 第三行');
   expect(api).toHaveBeenLastCalledWith('/api/translate', 'token', { html: '<div>&lt;b&gt;source&lt;/b&gt;\nnext &amp; last</div>', to: 'en' });
+});
+
+test('preview reads empty-text template controls and checks hidden source edits before insertion', async () => {
+  const { selection } = setup();
+  selection.text = '';
+  const xml = wordPackage('<w:p><w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:t>Sample</w:t></w:r></w:sdtContent></w:sdt></w:p>');
+  selection.getOoxml.mockReturnValue({ value: xml });
+  const preview = await capturePreview('selection');
+  expect(preview.text).toBe('Sample');
+  selection.getOoxml.mockReturnValue({ value: xml.replace('Sample', 'Changed') });
+  await expect(preview.insert('译文', () => true)).rejects.toThrow('原文范围已更改');
+  expect(selection.insertText).not.toHaveBeenCalled();
+  selection.getOoxml.mockReturnValue({ value: xml });
+  await preview.insert('译文', () => true);
+  expect(selection.insertText).toHaveBeenCalledWith('译文', 'Replace');
 });

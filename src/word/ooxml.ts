@@ -61,9 +61,22 @@ export function prepareOoxml(xml: string) {
     }
     // Fields, revisions, hyperlinks and breaks can carry
     // semantics that cannot safely be mapped to reordered translated runs.
-    const children = Array.from(paragraph.children);
-    if (children.some(child => child.namespaceURI !== W || !['pPr', 'r'].includes(child.localName))) unsafe = true;
-    const runs = children.filter(child => child.namespaceURI === W && child.localName === 'r');
+    const runs: Element[] = [];
+    // Walk ordinary inline template controls without flattening their XML.
+    // Bound/locked controls and other semantic wrappers remain unsupported.
+    function collectRuns(container: Element) {
+      for (const child of Array.from(container.children)) {
+        if (child.namespaceURI !== W) { unsafe = true; continue; }
+        if (child.localName === 'r') runs.push(child);
+        else if (child.localName === 'sdt') {
+          const content = Array.from(child.children).find(node => node.namespaceURI === W && node.localName === 'sdtContent');
+          if (!content || child.getElementsByTagNameNS(W, 'dataBinding').length
+            || child.getElementsByTagNameNS(W, 'lock').length) unsafe = true;
+          else collectRuns(content);
+        } else if (child.localName !== 'pPr' || container !== paragraph) unsafe = true;
+      }
+    }
+    collectRuns(paragraph);
     if (runs.some(run => Array.from(run.children).some(child => !isPictureDrawing(child)
       && (child.namespaceURI !== W || !['rPr', 't'].includes(child.localName))))) unsafe = true;
     if (unsafe) { skipped++; continue; }
@@ -110,6 +123,15 @@ export function prepareOoxml(xml: string) {
         spans.forEach((span, i) => {
           segment.nodes[i].textContent = span.textContent;
           segment.nodes[i].setAttributeNS(XML, 'xml:space', 'preserve');
+          // Translated sample text is now real content. Otherwise Word may
+          // redisplay the original glossary placeholder when reopening.
+          for (let parent = segment.nodes[i].parentElement; parent && parent !== body; parent = parent.parentElement) {
+            if (parent.namespaceURI !== W || parent.localName !== 'sdt') continue;
+            const properties = Array.from(parent.children).find(node => node.namespaceURI === W && node.localName === 'sdtPr');
+            for (const flag of Array.from(properties?.children || [])) {
+              if (flag.namespaceURI === W && flag.localName === 'showingPlcHdr') flag.remove();
+            }
+          }
         });
         translated++;
       });

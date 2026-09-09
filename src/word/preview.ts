@@ -1,4 +1,5 @@
 import { api, authenticate } from '../shared/api';
+import { prepareOoxml } from './ooxml';
 
 export interface PreviewRange {
   text: string;
@@ -14,12 +15,20 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
     range.load('text');
     await context.sync();
     const original = range.text;
-    if (!original.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前段落没有可翻译的文字。');
+    let placeholderPlan: ReturnType<typeof prepareOoxml> | undefined;
+    let text = original;
+    if (!original.trim()) {
+      const native = range.getOoxml();
+      await context.sync();
+      try { placeholderPlan = prepareOoxml(native.value); }
+      catch { throw new Error(scope === 'selection' ? '请先选中需要翻译的文字，或选择可翻译的普通模板内容。' : '当前段落没有可安全翻译的文字。'); }
+      text = placeholderPlan.paragraphs.map(html => new DOMParser().parseFromString(html, 'text/html').body.textContent || '').join('\n');
+    }
     context.trackedObjects.add(range);
     await context.sync();
     let released = false;
     return {
-      text: original,
+      text,
       async insert(text, shouldContinue) {
         if (released) throw new Error('请重新选择翻译范围。');
         await Word.run(range, async ctx => {
@@ -27,6 +36,15 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
           await ctx.sync();
           if (!shouldContinue()) throw new Error('已取消插入。');
           if (range.text !== original) throw new Error('原文范围已更改，请重新选择并翻译，避免覆盖您的编辑。');
+          if (placeholderPlan) {
+            const native = range.getOoxml();
+            await ctx.sync();
+            const current = prepareOoxml(native.value);
+            if (current.sourceText !== placeholderPlan.sourceText || current.mapping !== placeholderPlan.mapping) {
+              throw new Error('原文范围已更改，请重新选择并翻译，避免覆盖您的编辑。');
+            }
+            if (!shouldContinue()) throw new Error('已取消插入。');
+          }
           range.insertText(text, Word.InsertLocation.replace);
           await ctx.sync();
         });

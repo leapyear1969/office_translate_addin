@@ -52,6 +52,25 @@ test('desktop opens the untranslated copy on service failure without writing tra
   expect(ranges.storage.saveAsync).not.toHaveBeenCalled();
 });
 
+test('desktop translates placeholder OOXML even when source and copy Range.text are empty', async () => {
+  const ranges = setupDesktop();
+  const xml = wordPackage('<w:p><w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:t>Original</w:t></w:r></w:sdtContent></w:sdt></w:p>');
+  ranges.original.body.getRange = () => ({ text: '', load: jest.fn(), getOoxml: () => ({ value: xml }) });
+  ranges.body.text = '';
+  ranges.body.ooxml = xml;
+  await expect(translateDocument('body', 'ja')).resolves.toEqual({ htmlBackup: false, desktopCopy: true });
+  expect(ranges.body.insertOoxml).toHaveBeenCalledWith(expect.stringContaining('译文'), 'Replace');
+  expect(ranges.body.ooxml).not.toContain('showingPlcHdr');
+});
+
+test('desktop rejects truly empty OOXML before creating a copy or contacting the service', async () => {
+  const ranges = setupDesktop();
+  ranges.original.body.getRange = () => ({ text: '', load: jest.fn(), getOoxml: () => ({ value: wordPackage('<w:p/>') }) });
+  await expect(translateDocument('body', 'ja')).rejects.toThrow('没有可安全翻译');
+  expect(api).not.toHaveBeenCalled();
+  expect((ranges.context as any).application.createDocument).not.toHaveBeenCalled();
+});
+
 const webPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
   wordPackage(content).replace('<w:cols w:num="2"/>', '').replace(/<pkg:part pkg:name="\/word\/media\/image1.png">[\s\S]*?<\/pkg:part>/, '');
 function setupWeb() {

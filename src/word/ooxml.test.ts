@@ -39,6 +39,38 @@ const parse = (xml: string) => new DOMParser().parseFromString(xml, 'application
 const serialize = (node: Node) => new XMLSerializer().serializeToString(node);
 const paragraph = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
 
+const placeholder = (content: string, properties = '') => `<w:sdt><w:sdtPr><w:id w:val="42"/><w:placeholder><w:docPart w:val="sample"/></w:placeholder><w:showingPlcHdr/>${properties}</w:sdtPr><w:sdtContent>${content}</w:sdtContent></w:sdt>`;
+
+test('translates inline and block template placeholders while preserving controls and layout', () => {
+  const original = wordPackage('<w:tbl><w:tr><w:tc><w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+    + placeholder('<w:r><w:rPr><w:b/></w:rPr><w:t>MODERN LIVING</w:t></w:r>')
+    + '</w:p>' + placeholder(paragraph('Newsletter sample')) + '</w:tc></w:tr></w:tbl>');
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">MODERN LIVING</span></p>', '<p><span id="r0">Newsletter sample</span></p>']);
+  const result = plan.apply(['<p><span id="r0">现代生活</span></p>', '<p><span id="r0">通讯示例</span></p>']);
+  expect(result.skippedParagraphs).toBe(0);
+  const before = parse(original), after = parse(result.ooxml);
+  expect(after.getElementsByTagNameNS(W, 'sdt')).toHaveLength(2);
+  expect(after.getElementsByTagNameNS(W, 'showingPlcHdr')).toHaveLength(0);
+  for (const doc of [before, after]) {
+    for (const flag of Array.from(doc.getElementsByTagNameNS(W, 'showingPlcHdr'))) flag.remove();
+    for (const node of Array.from(doc.getElementsByTagNameNS(W, 't'))) {
+      node.textContent = ''; node.removeAttributeNS('http://www.w3.org/XML/1998/namespace', 'space');
+    }
+  }
+  expect(serialize(after)).toBe(serialize(before));
+});
+
+test.each(['<w:lock w:val="contentLocked"/>', '<w:dataBinding w:xpath="/value"/>'])('preserves protected inline placeholders: %s', properties => {
+  const original = wordPackage('<w:p>' + placeholder('<w:r><w:t>Protected</w:t></w:r>', properties) + '</w:p>' + paragraph('Safe'));
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">Safe</span></p>']);
+  const result = plan.apply(['<p><span id="r0">安全</span></p>']);
+  expect(result.skippedParagraphs).toBe(1);
+  expect(result.ooxml).toContain('>Protected<');
+  expect(result.ooxml).toContain('showingPlcHdr');
+});
+
 test('changes only text nodes while preserving newsletter layout, mixed fonts, images and package parts', () => {
   const original = wordPackage(`<w:tbl><w:tblPr><w:tblW w:w="9000" w:type="dxa"/><w:shd w:fill="E6EBEF"/></w:tblPr><w:tblGrid><w:gridCol w:w="6000"/><w:gridCol w:w="3000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="6000" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:pStyle w:val="Title"/><w:spacing w:after="240"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="48"/></w:rPr><w:t>Modern </w:t></w:r><w:r><w:rPr><w:i/><w:color w:val="0078D4"/></w:rPr><w:t>living</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:drawing><anchor xmlns="urn:drawing" position="123" image="rId1"/></w:drawing></w:r></w:p>`);
   const plan = prepareOoxml(original);

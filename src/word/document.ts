@@ -1,7 +1,7 @@
 import { api, authenticate } from '../shared/api';
 import { hasLegacyBackup, rangeBackups, saveRangeBackups, migrateDocumentBackups, TAG_PREFIX, RangeBackup } from './backup';
 import { prepareOoxml, rebaseOoxml } from './ooxml';
-import { checkWebDocument } from './web-safety';
+import { checkWebDocument, isWordOnline } from './web-safety';
 import { stripNestedBackups } from './backup-ooxml';
 
 export type Scope = 'selection' | 'paragraph' | 'body';
@@ -59,18 +59,19 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
         await migrateDocumentBackups();
         await checkWebDocument(context);
         range.load('text');
-        // Full-body translation must never round-trip the document through HTML.
-        const html = scope === 'body' ? undefined : range.getHtml();
+        // Web selections/paragraphs also retain picture resources through OOXML.
+        const nativeOoxml = scope === 'body' || isWordOnline();
+        const html = nativeOoxml ? undefined : range.getHtml();
         await syncStep(context, '读取翻译范围');
         let originalText = range.text;
         if (!originalText.trim()) throw new Error(scope === 'selection' ? '请先选中需要翻译的文字。' : '当前范围没有可翻译的文字。');
         if (html && html.value.length > 1000000) throw new Error('文档内容过长，请选择较小范围分次翻译。');
         await ensureNoOverlap(context, range);
         // Capture after retiring old pending wrappers so OOXML cannot revive them.
-        const bodyOoxml = scope === 'body' ? range.getOoxml() : undefined;
+        const bodyOoxml = nativeOoxml ? range.getOoxml() : undefined;
         if (bodyOoxml) {
           range.load('text');
-          await syncStep(context, '读取全文原生结构（失败时停止，不转换为 HTML）');
+          await syncStep(context, '读取翻译范围原生结构（失败时停止，不转换为 HTML）');
           originalText = range.text;
         }
         const plan = bodyOoxml ? prepareOoxml(bodyOoxml.value) : undefined;

@@ -1,6 +1,22 @@
 /** @jest-environment jsdom */
 import { prepareOoxml, rebaseOoxml } from './ooxml';
 import { wordPackage } from './test-fixtures/package';
+import { picture } from './test-fixtures/pictures';
+
+test.each(['inline', 'anchor'] as const)('translates both sides of a %s picture without changing any image structure', layout => {
+  const original = wordPackage(`<w:p><w:r><w:t>Before</w:t>${picture(layout)}<w:t>After</w:t></w:r></w:p>`);
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">Before</span></p>', '<p><span id="r0">After</span></p>']);
+  const result = plan.apply(['<p><span id="r0">之前</span></p>', '<p><span id="r0">之后</span></p>']);
+  expect(result.skippedParagraphs).toBe(0);
+  const before = parse(original), after = parse(result.ooxml);
+  expect(Array.from(after.getElementsByTagNameNS(W, 't')).map(node => node.textContent)).toEqual(['之前', '之后']);
+  for (const doc of [before, after]) for (const node of Array.from(doc.getElementsByTagNameNS(W, 't'))) {
+    node.textContent = ''; node.removeAttributeNS('http://www.w3.org/XML/1998/namespace', 'space');
+  }
+  expect(serialize(after)).toBe(serialize(before));
+  expect(() => rebaseOoxml(plan, original.replace(picture(layout), ''), ['a', 'b'])).toThrow('文字分段');
+});
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const parse = (xml: string) => new DOMParser().parseFromString(xml, 'application/xml');

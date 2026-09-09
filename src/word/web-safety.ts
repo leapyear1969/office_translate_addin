@@ -1,3 +1,5 @@
+import { isPictureDrawing } from './pictures';
+
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 export const WEB_LIMITS = { characters: 20000, paragraphs: 500, packageBytes: 5000000 };
@@ -37,6 +39,7 @@ function inspectHeaderFooter(root: Element, location: string, separator = false)
       : ['footnote', 'endnote'].includes(node.localName) ? ['p']
       : separator && node.localName === 'r' ? [...children.r, 'separator', 'continuationSeparator'] : (children[node.localName] || []);
     for (const child of Array.from(node.children)) {
+      if (!separator && node.localName === 'r' && isPictureDrawing(child)) continue;
       if (!allowed.includes(child.localName)) blocked(`${location}包含${labels[child.localName] || '尚未支持的结构或格式'}`);
       visit(child);
     }
@@ -93,8 +96,13 @@ export function inspectWebOoxml(xml: string, options: { headerFooter?: boolean; 
   const mainDocument = bodies![0].parentElement;
   if (mainDocument?.namespaceURI !== W || mainDocument.localName !== 'document'
     || Array.from(mainDocument.children).some(child => child !== bodies![0])) blocked('文档包含尚未支持的文档级结构');
-  if (parts.some(part => /\/(media|embeddings)\//i.test(part.getAttributeNS(PKG, 'name') || '')
-    || part.getElementsByTagNameNS(PKG, 'binaryData').length)) blocked('文档包含图片或嵌入资源');
+  for (const part of parts) {
+    const name = part.getAttributeNS(PKG, 'name') || '';
+    const binaryCount = part.getElementsByTagNameNS(PKG, 'binaryData').length;
+    if (/\/media\//i.test(name) && /^image\//i.test(part.getAttributeNS(PKG, 'contentType') || '')
+      && binaryCount === 1 && !part.getElementsByTagNameNS(PKG, 'xmlData').length) continue;
+    if (/\/(media|embeddings)\//i.test(name) || binaryCount) blocked('文档包含尚未支持的图片或嵌入资源');
+  }
   for (const part of parts) {
     const name = part.getAttributeNS(PKG, 'name') || '';
     if (/^\/word\/(header|footer)[^/]*\.xml$/i.test(name)) {
@@ -135,6 +143,7 @@ export function inspectWebOoxml(xml: string, options: { headerFooter?: boolean; 
     if (node.localName === 'cols' && Number(node.getAttributeNS(W, 'num') || '1') !== 1) blocked('文档包含分栏');
     if (node.localName === 'sectPr' && node.parentElement !== body) blocked('文档包含分节');
     for (const child of Array.from(node.children)) {
+      if (node.localName === 'r' && isPictureDrawing(child)) continue;
       if (options.headerFooterChecked && node.localName === 'sectPr' && child.namespaceURI === W
         && ['headerReference', 'footerReference'].includes(child.localName) && !child.children.length) continue;
       if (child.namespaceURI !== W || !(children[node.localName] || []).includes(child.localName)) {

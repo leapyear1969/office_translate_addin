@@ -1,5 +1,25 @@
 /** @jest-environment jsdom */
 import { inspectWebOoxml, WEB_LIMITS } from './web-safety';
+import { picture, withPictureParts } from './test-fixtures/pictures';
+
+test.each(['inline', 'anchor'] as const)('allows %s pictures in body, tables and headers', layout => {
+  const p = `<w:p><w:r><w:t>Before</w:t>${picture(layout)}<w:t>After</w:t></w:r></w:p>`;
+  for (const content of [p, `<w:tbl><w:tr><w:tc>${p}</w:tc></w:tr></w:tbl>`]) {
+    expect(() => inspectWebOoxml(withPictureParts(simplePackage(content)))).not.toThrow();
+    expect(() => inspectWebOoxml(withPictureParts(simplePackage(content)), { headerFooter: true })).not.toThrow();
+    expect(() => inspectWebOoxml(withPictureParts(withPart('header1', `<w:hdr>${content}</w:hdr>`)))).not.toThrow();
+  }
+});
+
+test('pictures do not admit charts, text boxes, or embedded objects', () => {
+  for (const drawing of [picture().replace('uri="http://schemas.openxmlformats.org/drawingml/2006/picture"', 'uri="urn:chart"'),
+    picture().replace('</pic:spPr>', '<w:txbxContent><w:p/></w:txbxContent></pic:spPr>')]) {
+    expect(() => inspectWebOoxml(withPictureParts(simplePackage(`<w:p><w:r>${drawing}</w:r></w:p>`)))).toThrow('图片');
+  }
+  const xml = withPictureParts(simplePackage());
+  expect(() => inspectWebOoxml(xml.replace('image/png', 'application/octet-stream'))).toThrow('嵌入');
+  expect(() => inspectWebOoxml(xml.replace('/word/media/image1.png', '/word/embeddings/object.bin'))).toThrow('嵌入');
+});
 
 export const simplePackage = (content = '<w:p><w:r><w:t>Hello</w:t></w:r></w:p>') =>
   `<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><pkg:part pkg:name="/word/document.xml"><pkg:xmlData><w:document><w:body>${content}</w:body></w:document></pkg:xmlData></pkg:part></pkg:package>`;

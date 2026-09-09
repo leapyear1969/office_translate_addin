@@ -6,6 +6,7 @@ import { rangeBackups, saveRangeBackups, TAG_PREFIX } from './backup';
 import { randomUUID } from 'crypto';
 import { resetIndexedDB } from './test-fixtures/indexeddb';
 import * as backupStore from './backup-store';
+import { picture, withPictureParts } from './test-fixtures/pictures';
 jest.mock('../shared/api');
 
 const webPackage = (content = '<w:p><w:r><w:t>Original</w:t></w:r></w:p>') =>
@@ -15,6 +16,8 @@ function setupWeb() {
   (Office as any).PlatformType = { OfficeOnline: 'OfficeOnline' };
   (Office.context as any).platform = 'OfficeOnline';
   ranges.body.ooxml = webPackage();
+  ranges.selection.ooxml = webPackage();
+  ranges.paragraph.ooxml = webPackage();
   const tables = { items: [] as { isUniform: boolean; nestingLevel: number }[], load: jest.fn() };
   const extra = { text: '', load: jest.fn(), getOoxml: () => ({ value: webPackage('<w:p/>') }), tables: { items: [] as typeof tables.items, load: jest.fn() } };
   (ranges.context.document.body as any).tables = tables;
@@ -293,6 +296,36 @@ test('deleted controls never cause fallback to whole-document restoration', asyn
   controls.splice(0);
   expect(await restoreOriginalBody()).toEqual({ restored: 0, skipped: 0 });
   expect(context.document.body.insertOoxml).not.toHaveBeenCalled();
+});
+
+test.each(['selection', 'paragraph', 'body'] as const)('web %s preserves pictures through translation and restoration', async scope => {
+  const ranges = setupWeb();
+  const original = withPictureParts(webPackage(`<w:p><w:r>${picture()}<w:t>Original</w:t></w:r></w:p>`));
+  ranges.body.ooxml = original;
+  ranges[scope].ooxml = original;
+  await translateDocument(scope, 'ja');
+  expect(api).toHaveBeenCalledWith('/api/translate/word', 'token', {
+    paragraphs: ['<p><span id="r0">Original</span></p>'], to: 'ja',
+  });
+  const written = ranges[scope].insertOoxml.mock.calls[0][0];
+  expect(written).toContain('译文');
+  expect(written).toContain('r:embed="rIdImage"');
+  expect(written).toContain('aW1hZ2U=');
+  expect(written).toContain('Target="media/image1.png"');
+  expect(ranges[scope].getHtml).not.toHaveBeenCalled();
+  expect(ranges[scope].insertHtml).not.toHaveBeenCalled();
+  expect((await rangeBackups())[0].originalOoxml).toBe(original);
+  await restoreOriginalBody();
+  expect(ranges[scope].ooxml).toBe(original);
+});
+
+test.each(['selection', 'paragraph'] as const)('web %s range export failures never fall back to HTML', async scope => {
+  const ranges = setupWeb();
+  ranges[scope].getOoxml.mockImplementation(() => { throw new Error('ooxmlIsMalformed'); });
+  await expect(translateDocument(scope, 'ja')).rejects.toThrow('ooxmlIsMalformed');
+  expect(api).not.toHaveBeenCalled();
+  expect(ranges[scope].insertHtml).not.toHaveBeenCalled();
+  expect(ranges[scope].insertOoxml).not.toHaveBeenCalled();
 });
 
 test('cleared browser storage reports missing backups and never overwrites the translation', async () => {

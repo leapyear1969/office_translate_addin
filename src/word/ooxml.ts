@@ -1,4 +1,5 @@
 import { stripNestedBackups } from './backup-ooxml';
+import { isPictureDrawing } from './pictures';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG = 'http://schemas.microsoft.com/office/2006/xmlPackage';
@@ -58,15 +59,27 @@ export function prepareOoxml(xml: string) {
           || parent.getElementsByTagNameNS(W, 'lock').length) unsafe = true;
       }
     }
-    // Fields, revisions, hyperlinks, breaks and drawing anchors can carry
+    // Fields, revisions, hyperlinks and breaks can carry
     // semantics that cannot safely be mapped to reordered translated runs.
     const children = Array.from(paragraph.children);
     if (children.some(child => child.namespaceURI !== W || !['pPr', 'r'].includes(child.localName))) unsafe = true;
     const runs = children.filter(child => child.namespaceURI === W && child.localName === 'r');
-    if (runs.some(run => Array.from(run.children).some(child => child.namespaceURI !== W || !['rPr', 't'].includes(child.localName)))) unsafe = true;
-    const html = '<p>' + nodes.map((node, i) => `<span id="r${i}">${escapeHtml(node.textContent || '')}</span>`).join('') + '</p>';
-    if (unsafe || html.length > 40000) { skipped++; continue; }
-    segments.push({ nodes, html, index });
+    if (runs.some(run => Array.from(run.children).some(child => !isPictureDrawing(child)
+      && (child.namespaceURI !== W || !['rPr', 't'].includes(child.localName))))) unsafe = true;
+    if (unsafe) { skipped++; continue; }
+    // Never move translated words across an image. Each side is an independent
+    // segment, including pictures and text that share a single run.
+    const groups: Element[][] = [[]];
+    for (const run of runs) for (const child of Array.from(run.children)) {
+      if (isPictureDrawing(child)) groups.push([]);
+      else if (child.namespaceURI === W && child.localName === 't') groups[groups.length - 1].push(child);
+    }
+    const candidates = groups.filter(group => group.some(node => node.textContent?.trim())).map(group => ({
+      nodes: group, index,
+      html: '<p>' + group.map((node, i) => `<span id="r${i}">${escapeHtml(node.textContent || '')}</span>`).join('') + '</p>',
+    }));
+    if (candidates.some(segment => segment.html.length > 40000)) { skipped++; continue; }
+    segments.push(...candidates);
   }
   if (!segments.length) throw new Error(`没有可安全翻译的正文段落${skipped ? `，${skipped} 个复杂段落已保留原文` : ''}。`);
   if (segments.reduce((total, segment) => total + segment.html.length, 0) > 1000000) throw new Error('文档文字过长，请分次翻译。');
@@ -79,6 +92,7 @@ export function prepareOoxml(xml: string) {
         || translations.some(value => typeof value !== 'string')
         || translations.join('').length > 1000000) throw new Error('译文无效或不完整，已取消全文翻译。');
       let translated = 0;
+      const skippedSegments = new Set<number>();
       segments.forEach((segment, index) => {
         const result = new DOMParser().parseFromString(translations[index], 'text/html');
         const paragraph = result.body.children[0];
@@ -91,7 +105,7 @@ export function prepareOoxml(xml: string) {
           || Array.from(paragraph.childNodes).some(node => node.nodeType !== 1 && node.textContent?.trim())
           || spans.some((span, i) => span.tagName !== 'SPAN' || span.id !== `r${i}` || span.children.length
             || ((segment.nodes[i].textContent || '').trim() && !span.textContent?.trim()))) {
-          skipped++; return;
+          skippedSegments.add(segment.index); return;
         }
         spans.forEach((span, i) => {
           segment.nodes[i].textContent = span.textContent;
@@ -102,7 +116,7 @@ export function prepareOoxml(xml: string) {
       if (!translated) throw new Error('译文格式标记无法安全对应原文，未修改正文。');
       const ooxml = new XMLSerializer().serializeToString(doc);
       if (ooxml.length > MAX_PACKAGE) throw new Error('译文文档结构过大，已取消全文翻译。');
-      return { ooxml, skippedParagraphs: skipped };
+      return { ooxml, skippedParagraphs: skipped + skippedSegments.size };
     },
   };
 }

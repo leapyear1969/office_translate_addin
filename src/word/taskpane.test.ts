@@ -260,8 +260,9 @@ test('edits debounce, invalidate old results immediately, and ignore stale respo
     jest.advanceTimersByTime(599); await settle();
     expect(translatePreview).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(1); await settle();
-    expect(translatePreview).toHaveBeenLastCalledWith('New', 'ja');
+    expect(translatePreview).toHaveBeenCalledTimes(1);
     resolveOld('Stale translation'); await settle();
+    expect(translatePreview).toHaveBeenLastCalledWith('New', 'ja');
     expect(textarea('translated-text').value).toBe('Translated text');
     source.value = ''; source.dispatchEvent(new Event('input'));
     jest.advanceTimersByTime(1000); await settle();
@@ -374,4 +375,37 @@ test('Word selection changes debounce and respect paragraph and document scopes'
     changed(); jest.advanceTimersByTime(300); await settle();
     expect(capturePreview).not.toHaveBeenCalled();
   } finally { jest.useRealTimers(); }
+});
+
+test('preview serializes requests and retains only the latest queued input', async () => {
+  jest.useFakeTimers();
+  try {
+    const { translatePreview } = await setup();
+    let resolve!: (text: string) => void;
+    translatePreview.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    button('translate-selection').click(); await settle();
+    const source = textarea('source-text');
+    for (const text of ['Intermediate', 'Latest']) {
+      source.value = text; source.dispatchEvent(new Event('input'));
+      jest.advanceTimersByTime(600); await settle();
+    }
+    expect(translatePreview).toHaveBeenCalledTimes(1);
+    resolve('Stale'); await settle();
+    expect(translatePreview).toHaveBeenCalledTimes(2);
+    expect(translatePreview).toHaveBeenLastCalledWith('Latest', 'ja');
+    expect(textarea('translated-text').value).toBe('Translated text');
+  } finally { jest.useRealTimers(); }
+});
+
+test('leaving preview discards queued work as well as in-flight results', async () => {
+  const { translatePreview } = await setup();
+  let resolve!: (text: string) => void;
+  translatePreview.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  button('translate-selection').click(); await settle();
+  textarea('source-text').value = 'Queued';
+  button('retry-preview').click(); await settle();
+  button('document-tab').click();
+  resolve('Stale'); await settle();
+  expect(translatePreview).toHaveBeenCalledTimes(1);
+  expect(textarea('translated-text').value).toBe('');
 });

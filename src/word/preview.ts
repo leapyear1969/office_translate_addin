@@ -69,7 +69,7 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
 
 export async function translatePreview(text: string, target: string): Promise<string> {
   if (text.length > 20000) throw new Error('预览内容超过 20000 字符，请缩小范围。');
-  const session = await authenticate();
+  const session = await authenticate(false);
   // Text is escaped before entering the existing HTML translation endpoint.
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const result = await api<{ html: string }>('/api/translate', session.token, { html: `<div>${escaped}</div>`, to: target });

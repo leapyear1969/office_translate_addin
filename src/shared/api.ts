@@ -2,6 +2,33 @@ export interface UserProfile { id: string; displayName: string; mail: string; te
 export interface Session { token: string; user: UserProfile }
 declare const OfficeRuntime: { auth: { getAccessToken(options: { allowSignInPrompt: boolean; allowConsentPrompt: boolean }): Promise<string> } };
 
+let pendingToken: Promise<string> | undefined;
+let pendingSession: Promise<Session> | undefined;
+let retryAfter = 0;
+let cooldownMs = 60000;
+function throttled() {
+  return Object.assign(new Error(`Office SSO 请求过于频繁（13013），请在 ${Math.max(1, Math.ceil((retryAfter - Date.now()) / 1000))} 秒后重试。`),
+    { code: '13013', retryAfter });
+}
+function getSsoToken(interactive: boolean): Promise<string> {
+  if (Date.now() < retryAfter) return Promise.reject(throttled());
+  if (!pendingToken) {
+    // Keep the native request locked even when a caller's wait times out:
+    // Office does not expose cancellation for getAccessToken.
+    pendingToken = Promise.resolve().then(() => OfficeRuntime.auth.getAccessToken({
+      allowSignInPrompt: interactive, allowConsentPrompt: interactive,
+    })).then(token => { cooldownMs = 60000; return token; }).catch(error => {
+      if (String(error?.code) === '13013') {
+        retryAfter = Date.now() + cooldownMs;
+        cooldownMs = Math.min(cooldownMs * 2, 300000);
+        throw throttled();
+      }
+      throw error;
+    }).finally(() => { pendingToken = undefined; });
+  }
+  return pendingToken;
+}
+
 export async function api<T>(path: string, token: string, body?: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 110000);
@@ -19,7 +46,14 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
   } finally { clearTimeout(timer); }
 }
 
-export async function authenticate(interactive = true): Promise<Session> {
+export function authenticate(interactive = true): Promise<Session> {
+  // The first caller determines prompt permissions; automatic work must never
+  // upgrade an in-flight silent request into an interactive request.
+  if (!pendingSession) pendingSession = authenticateOnce(interactive).finally(() => { pendingSession = undefined; });
+  return pendingSession;
+}
+
+async function authenticateOnce(interactive: boolean): Promise<Session> {
   if (typeof OfficeRuntime === 'undefined' || !OfficeRuntime.auth?.getAccessToken) {
     throw new Error('当前环境不支持 Office SSO，请在支持 Office SSO 的 Office 客户端中打开插件。');
   }
@@ -27,11 +61,12 @@ export async function authenticate(interactive = true): Promise<Session> {
   let token: string;
   try {
     token = await Promise.race([
-      OfficeRuntime.auth.getAccessToken({ allowSignInPrompt: interactive, allowConsentPrompt: interactive }),
+      getSsoToken(interactive),
       new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('SSO 登录超时，请重试。')), 20000); }),
     ]);
   } catch (error) {
     const value = error as { code?: number; message?: string };
+    if (String(value.code) === '13013') throw error;
     if (String(value.code) === '13004') {
       throw new Error('SSO 登录失败（13004）：加载项清单的 SSO 资源地址无效。请检查页面地址与 WebApplicationInfo/Resource 的域名和端口是否一致，并确认 Resource 与 Entra Application ID URI 相同；修正后重新加载清单。');
     }

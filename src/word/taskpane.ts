@@ -25,11 +25,14 @@ let previewEpoch = 0;
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let composing = false;
 let previewReady = false;
+let previewRunning = false;
+let queuedPreview: (() => Promise<void>) | undefined;
 const sourceText = element<HTMLTextAreaElement>('source-text');
 const translatedText = element<HTMLTextAreaElement>('translated-text');
 const previewTarget = element<HTMLSelectElement>('preview-target');
 function invalidatePreview() {
   ++previewEpoch;
+  queuedPreview = undefined;
   clearTimeout(previewTimer);
   previewReady = false;
   translatedText.value = '';
@@ -52,6 +55,9 @@ function schedulePreview(immediate = false) {
   const language = previewTarget.value;
   status('正在翻译…');
   const run = async () => {
+    if (epoch !== previewEpoch || signedOut || translating || composing) return;
+    if (previewRunning) { queuedPreview = run; return; }
+    previewRunning = true;
     try {
       const result = await translatePreview(text, language);
       if (epoch !== previewEpoch || signedOut) return;
@@ -62,6 +68,11 @@ function schedulePreview(immediate = false) {
     } catch (error) {
       if (epoch !== previewEpoch) return;
       status((error as Error).message, true);
+    } finally {
+      previewRunning = false;
+      const next = queuedPreview;
+      queuedPreview = undefined;
+      if (next) void next();
     }
   };
   if (immediate) void run();

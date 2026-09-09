@@ -41,6 +41,31 @@ const paragraph = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
 
 const placeholder = (content: string, properties = '') => `<w:sdt><w:sdtPr><w:id w:val="42"/><w:placeholder><w:docPart w:val="sample"/></w:placeholder><w:showingPlcHdr/>${properties}</w:sdtPr><w:sdtContent>${content}</w:sdtContent></w:sdt>`;
 
+test.each(['<w:br/>', '<w:cr/>', '<w:tab/>', '<w:br w:type="page"/>', '<w:br w:type="column"/>'])('translates around %s while preserving the separator and formatting', separator => {
+  const original = wordPackage('<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Are you</w:t>' + separator + '<w:t>ready to list?</w:t></w:r></w:p>');
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">Are you</span></p>', '<p><span id="r0">ready to list?</span></p>']);
+  const result = plan.apply(['<p><span id="r0">您是否</span></p>', '<p><span id="r0">准备好挂牌出售？</span></p>']);
+  expect(result.skippedParagraphs).toBe(0);
+  const before = parse(original), after = parse(result.ooxml);
+  for (const doc of [before, after]) for (const node of Array.from(doc.getElementsByTagNameNS(W, 't'))) {
+    node.textContent = ''; node.removeAttributeNS('http://www.w3.org/XML/1998/namespace', 'space');
+  }
+  expect(serialize(after)).toBe(serialize(before));
+  expect(() => rebaseOoxml(plan, original.replace(separator, ''), plan.paragraphs)).toThrow('文字分段');
+});
+
+test('template trailing whitespace does not require a translation marker and remains untouched', () => {
+  const original = wordPackage('<w:p>' + placeholder('<w:r><w:t>Your guide to buy or rent</w:t></w:r>')
+    + '<w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p>');
+  const plan = prepareOoxml(original);
+  expect(plan.paragraphs).toEqual(['<p><span id="r0">Your guide to buy or rent</span> </p>']);
+  const result = plan.apply(['<p><span id="r0">购房或租房指南</span></p>']);
+  expect(result.skippedParagraphs).toBe(0);
+  expect(result.ooxml).toContain('<w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve"> </w:t></w:r>');
+  expect(result.ooxml).toContain('购房或租房指南');
+});
+
 test('translates inline and block template placeholders while preserving controls and layout', () => {
   const original = wordPackage('<w:tbl><w:tr><w:tc><w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
     + placeholder('<w:r><w:rPr><w:b/></w:rPr><w:t>MODERN LIVING</w:t></w:r>')

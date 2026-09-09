@@ -6,6 +6,7 @@ const PKG = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML = 'http://www.w3.org/XML/1998/namespace';
 const MAX_PACKAGE = 20000000;
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const isSeparator = (node: Element) => node.namespaceURI === W && ['br', 'cr', 'tab'].includes(node.localName);
 
 function parse(xml: string): XMLDocument {
   if (!xml || xml.length > MAX_PACKAGE || /<!DOCTYPE/i.test(xml)) throw new Error('文档结构为空、过大或不受支持，已取消全文翻译。');
@@ -59,7 +60,7 @@ export function prepareOoxml(xml: string) {
           || parent.getElementsByTagNameNS(W, 'lock').length) unsafe = true;
       }
     }
-    // Fields, revisions, hyperlinks and breaks can carry
+    // Fields, revisions and hyperlinks can carry
     // semantics that cannot safely be mapped to reordered translated runs.
     const runs: Element[] = [];
     // Walk ordinary inline template controls without flattening their XML.
@@ -77,20 +78,28 @@ export function prepareOoxml(xml: string) {
       }
     }
     collectRuns(paragraph);
-    if (runs.some(run => Array.from(run.children).some(child => !isPictureDrawing(child)
+    if (runs.some(run => Array.from(run.children).some(child => !isPictureDrawing(child) && !isSeparator(child)
       && (child.namespaceURI !== W || !['rPr', 't'].includes(child.localName))))) unsafe = true;
     if (unsafe) { skipped++; continue; }
-    // Never move translated words across an image. Each side is an independent
-    // segment, including pictures and text that share a single run.
+    // Keep pictures, manual breaks and tabs in place, translating each side
+    // independently even when text and a separator share a single run.
     const groups: Element[][] = [[]];
     for (const run of runs) for (const child of Array.from(run.children)) {
-      if (isPictureDrawing(child)) groups.push([]);
+      if (isPictureDrawing(child) || isSeparator(child)) groups.push([]);
       else if (child.namespaceURI === W && child.localName === 't') groups[groups.length - 1].push(child);
     }
-    const candidates = groups.filter(group => group.some(node => node.textContent?.trim())).map(group => ({
-      nodes: group, index,
-      html: '<p>' + group.map((node, i) => `<span id="r${i}">${escapeHtml(node.textContent || '')}</span>`).join('') + '</p>',
-    }));
+    const candidates = groups.filter(group => group.some(node => node.textContent?.trim())).map(group => {
+      const textNodes = group.filter(node => node.textContent?.trim());
+      let marker = 0;
+      return {
+        nodes: textNodes, index,
+        // Whitespace-only runs stay local. Services may discard empty spans;
+        // whitespace between markers still supplies normal sentence spacing.
+        html: '<p>' + group.map(node => node.textContent?.trim()
+          ? `<span id="r${marker++}">${escapeHtml(node.textContent)}</span>`
+          : escapeHtml(node.textContent || '')).join('') + '</p>',
+      };
+    });
     if (candidates.some(segment => segment.html.length > 40000)) { skipped++; continue; }
     segments.push(...candidates);
   }

@@ -29,8 +29,11 @@ test('restores the width after closing and reopening', () => {
 test('corrects narrow panes without replacing the saved width', () => {
   cleanup = rememberPaneWidth();
   drag(420);
-  drag(200);
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 200 });
+  window.dispatchEvent(new Event('resize'));
+  // The minimum must be applied during the resize event, before any timer.
   expect(setWidth).toHaveBeenLastCalledWith(330);
+  jest.advanceTimersByTime(250);
   expect(localStorage.getItem('word-translator.pane-width')).toBe('420');
 });
 test('clamps restored widths to the web host limit', () => {

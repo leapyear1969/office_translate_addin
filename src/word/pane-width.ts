@@ -16,10 +16,12 @@ export function rememberPaneWidth() {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const onResize = () => {
     clearTimeout(timer);
+    const width = window.innerWidth;
+    if (document.hidden || width <= 0) return;
+    // Correct the host immediately; debounce only persistence, not the limit.
+    if (width < MIN_WIDTH) { resize(MIN_WIDTH); return; }
     timer = setTimeout(() => {
-      const width = window.innerWidth;
-      if (document.hidden || width <= 0) return;
-      if (width < MIN_WIDTH) { resize(MIN_WIDTH); return; }
+      if (document.hidden) return;
       try { localStorage.setItem(STORAGE_KEY, String(normalize(width))); } catch { /* Storage is optional. */ }
     }, 250);
   };

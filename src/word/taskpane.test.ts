@@ -14,11 +14,12 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   const translatePreview = jest.fn(async () => 'Translated text');
   jest.doMock('./preview', () => ({ capturePreview, translatePreview }));
   const restoreOriginalBody = jest.fn(async () => ({ restored: 1, skipped: 0 }));
+  const clearTranslationControls = jest.fn(async () => 2);
   const migrateDocumentBackups = jest.fn(async () => false);
   jest.doMock('./backup', () => ({ migrateDocumentBackups }));
   const api = jest.fn(async () => ({ language: 'en', score: 1 }));
   const authenticate = jest.fn(async () => ({ token: 'token', user: { displayName: 'User', mail: 'user@example.com' } }));
-  jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody }));
+  jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody, clearTranslationControls }));
   jest.doMock('../shared/api', () => ({ api, authenticate }));
   const requestConsent = jest.fn(async () => 'https://example.com/auth');
   jest.doMock('../shared/consent', () => ({ requestConsent }));
@@ -35,8 +36,26 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
     context: { platform: web ? 'OfficeOnline' : undefined, document: { settings: { get: () => saved, set: (_key: string, value: typeof saved) => { saved = value; }, saveAsync } } },
   };
   require('./taskpane'); await ready({ host: 'Word' }); await settle();
-  return { captured, capturePreview, translatePreview, translateDocument, restoreOriginalBody, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
+  return { captured, capturePreview, translatePreview, translateDocument, restoreOriginalBody, clearTranslationControls, migrateDocumentBackups, commands, api, saveAsync, authenticate, requestConsent, savedSettings: () => saved };
 }
+
+test('clear controls releases the preview, reports failures and permits retry without authentication', async () => {
+  const { clearTranslationControls, captured, authenticate } = await setup();
+  button('translate-selection').click(); await settle();
+  authenticate.mockClear();
+  clearTranslationControls.mockRejectedValueOnce(new Error('清除失败'));
+  button('clear-translation-controls').click(); await settle();
+  expect(captured.release).toHaveBeenCalled();
+  expect(button('insert-translation').disabled).toBe(true);
+  expect(button('status').textContent).toBe('清除失败');
+  expect(button('clear-translation-controls').disabled).toBe(false);
+  button('clear-translation-controls').click(); await settle();
+  expect(button('status').textContent).toContain('已清除 2 个翻译控件');
+  expect(authenticate).not.toHaveBeenCalled();
+  clearTranslationControls.mockResolvedValueOnce(0);
+  button('clear-translation-controls').click(); await settle();
+  expect(button('status').textContent).toContain('没有可清除');
+});
 
 test('migration button reports local-only recovery and allows retry after failure', async () => {
   const { migrateDocumentBackups } = await setup();

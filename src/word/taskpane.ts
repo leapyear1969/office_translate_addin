@@ -1,7 +1,7 @@
 import { setupAccount } from '../shared/account';
 import { authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
-import { translateDocument, restoreOriginalBody, Scope } from './document';
+import { translateDocument, restoreOriginalBody, clearTranslationControls, Scope } from './document';
 import { loadSettings, saveSettings, WordSettings } from './settings';
 import { LANGUAGES } from '../shared/settings';
 import { isWordOnline } from './web-safety';
@@ -112,7 +112,7 @@ function updateDocumentActions() {
   sourceText.disabled = translating || signedOut;
   previewTarget.disabled = translating || signedOut;
   element<HTMLButtonElement>('insert-translation').disabled = translating || signedOut || !previewReady || !previewRange;
-  ['translate-selection', 'translate-paragraph', 'translate-body', 'restore-original', 'confirm-restore', 'compact-backups'].forEach(id => {
+  ['translate-selection', 'translate-paragraph', 'translate-body', 'restore-original', 'confirm-restore', 'compact-backups', 'clear-translation-controls'].forEach(id => {
     element<HTMLButtonElement>(id).disabled = translating || (signedOut && id.startsWith('translate'));
   });
 }
@@ -220,6 +220,21 @@ element('insert-translation').addEventListener('click', async () => {
     await releasePreview();
     element('preview-status').textContent = '译文已插入，可使用 Word 撤销。继续翻译请重新选择范围。';
   } catch (error) { element('preview-status').textContent = (error as Error).message; }
+  finally { translating = false; updateDocumentActions(); }
+});
+element('clear-translation-controls').addEventListener('click', async () => {
+  if (translating || authorizing) return;
+  translating = true;
+  invalidatePreview();
+  updateDocumentActions();
+  element('restore-prompt').hidden = true;
+  status('正在清除翻译控件…');
+  try {
+    await releasePreview();
+    const count = await clearTranslationControls();
+    status(count ? `已清除 ${count} 个翻译控件，文字和格式已保留。可重新选择内容翻译；这些范围无法再通过“恢复原文”还原。需要撤销清除时请使用 Word 撤销。请保存文档。`
+      : '当前文档没有可清除的翻译控件。');
+  } catch (error) { status((error as Error).message, true); }
   finally { translating = false; updateDocumentActions(); }
 });
 element('compact-backups').addEventListener('click', async () => {

@@ -68,7 +68,7 @@
       <button id="restore-original" type="button" disabled>恢复原文</button>
       <button id="compact-backups" type="button" disabled>将旧备份移到此浏览器</button>
     </section>
-    <p id="backup-notice" class="hint">原文备份仅保存在当前浏览器，不随文件共享。恢复需使用同一浏览器配置和插件地址；更换设备、浏览器、使用隐私模式或清除站点数据后可能无法恢复。桌面 Word 与网页版的备份也不互通。请另存原文件副本。恢复该范围的原文及原格式，范围外的编辑会保留；译文文字已修改时跳过。重叠范围需先恢复再翻译。</p>
+    <p id="backup-notice" class="hint">原文备份仅保存在当前浏览器，不随文件共享。恢复需使用同一浏览器配置和插件地址；更换设备、浏览器、使用隐私模式或清除站点数据后可能无法恢复。桌面 Word 与网页版的备份也不互通。请另存原文件副本。恢复该范围的原文及原格式，范围外的编辑会保留；译文文字已修改时跳过。重叠范围需先恢复原文，或清除翻译控件并保留译文后再翻译。</p>
     <section id="restore-prompt" hidden aria-label="确认恢复原文">
       <p>恢复所有文字未修改的译文及其原格式？翻译范围内后改的格式、图片等也会还原；范围外的编辑会保留，文字已修改的译文会跳过。</p>
       <button id="confirm-restore" type="button">确认恢复翻译内容</button>
@@ -81,6 +81,10 @@
         <div class="footer"><button class="primary" type="submit" id="save">保存设置</button><span id="save-status" role="status" aria-live="polite"></span></div>
       </fieldset>
     </form>
+    </section>
+    <section aria-label="清除翻译控件">
+      <button id="clear-translation-controls" type="button" aria-describedby="clear-controls-notice" disabled>清除全部翻译控件（保留译文）</button>
+      <p id="clear-controls-notice" class="hint">移除当前文档中本插件的全部翻译控件，保留文字和格式，之后可重新选择翻译。清除后这些范围无法通过“恢复原文”还原；需要撤销清除时请使用 Word 撤销。</p>
     </section>
     <p id="status" role="status" aria-live="polite"></p>
   </main>

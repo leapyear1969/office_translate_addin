@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { translateDocument, restoreOriginalBody } from './document';
+import { translateDocument, restoreOriginalBody, clearTranslationControls } from './document';
 import { wordPackage } from './test-fixtures/package';
 import { api, authenticate } from '../shared/api';
 import { rangeBackups, saveRangeBackups, TAG_PREFIX } from './backup';
@@ -242,6 +242,37 @@ function setup() {
     : { html: '<p>译文</p>' }) as any);
   return { context, selection, paragraph, body, storage, controls };
 }
+
+test('clearing preserves content and backups, ignores other controls, and permits retranslating', async () => {
+  const { selection, controls } = setup();
+  await translateDocument('selection', 'ja');
+  const translated = controls[0];
+  const saved = await rangeBackups();
+  const html = selection.html;
+  const others = [null, '', 'template-control'].map(tag => {
+    const control = selection.insertContentControl(); control.tag = tag; return control;
+  });
+  selection.relation = 'Equal';
+  await expect(translateDocument('selection', 'ja')).rejects.toThrow('尚未恢复');
+  await expect(clearTranslationControls()).resolves.toBe(1);
+  expect(translated.delete).toHaveBeenCalledWith(true);
+  expect(selection.text).toBe('译文');
+  expect(selection.html).toBe(html);
+  expect(await rangeBackups()).toEqual(saved);
+  others.forEach(control => expect(control.delete).not.toHaveBeenCalled());
+  await expect(translateDocument('selection', 'ja')).resolves.toEqual({ htmlBackup: false });
+});
+
+test('clearing orphaned controls needs no backup and releases its lock after failure', async () => {
+  const { context, selection } = setup();
+  const control = selection.insertContentControl();
+  control.tag = TAG_PREFIX + 'orphan';
+  context.sync.mockRejectedValueOnce(new Error('Host failure'));
+  await expect(clearTranslationControls()).rejects.toThrow('Host failure');
+  expect(control.delete).not.toHaveBeenCalled();
+  await expect(clearTranslationControls()).resolves.toBe(1);
+  await expect(clearTranslationControls()).resolves.toBe(0);
+});
 
 test.each(['selection', 'paragraph', 'body'] as const)('backs up and translates only the %s range', async scope => {
   const ranges = setup();

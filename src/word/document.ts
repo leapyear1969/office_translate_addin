@@ -45,7 +45,7 @@ async function ensureNoOverlap(context: Word.RequestContext, range: Word.Range, 
   await context.sync();
   const separate = ['Before', 'After', 'AdjacentBefore', 'AdjacentAfter', 'Unrelated'];
   if (relations.some(relation => !separate.includes(relation.value))) {
-    throw new Error('所选范围包含尚未恢复的翻译，请先恢复该翻译，再重新选择内容。');
+    throw new Error('所选范围包含尚未恢复的翻译，请先恢复原文，或点击“清除全部翻译控件（保留译文）”，再重新选择内容。');
   }
 }
 
@@ -177,6 +177,25 @@ export async function translateDocument(scope: Scope, target: string, shouldCont
           await context.sync();
         } finally { await desktop?.finish(); }
       }
+    });
+  } finally { busy = false; }
+}
+
+// Retain backups: Word Undo can bring the controls back. Cleanup must also
+// work when the original backup storage is unavailable on this device.
+export async function clearTranslationControls(): Promise<number> {
+  if (busy) throw new Error('文档操作正在进行，请稍后重试。');
+  busy = true;
+  try {
+    return await Word.run(async context => {
+      const controls = context.document.contentControls;
+      controls.load('items/tag');
+      await context.sync();
+      const translations = controls.items.filter(control => typeof control.tag === 'string'
+        && control.tag.startsWith(TAG_PREFIX));
+      translations.forEach(control => control.delete(true));
+      if (translations.length) await syncStep(context, '清除翻译控件（若部分控件已清除，可重试；需要还原时请使用 Word 撤销）');
+      return translations.length;
     });
   } finally { busy = false; }
 }

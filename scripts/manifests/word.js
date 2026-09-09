@@ -24,11 +24,6 @@ module.exports = function wordManifest(config) {
         </Control>
       </Group></OfficeTab></ExtensionPoint>
       <ExtensionPoint xsi:type="ContextMenu"><OfficeMenu id="ContextMenuText">
-        <Control xsi:type="Button" id="WordTranslation.Selection">
-          <Label resid="Selection.Label"/><Supertip><Title resid="Selection.Label"/><Description resid="Selection.Description"/></Supertip>
-          <Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon>
-          <Action xsi:type="ExecuteFunction"><FunctionName>translateSelectionChinese</FunctionName></Action>
-        </Control>
         <Control xsi:type="Button" id="WordTranslation.Settings">
           <Label resid="Settings.Label"/><Supertip><Title resid="Settings.Label"/><Description resid="Open.Description"/></Supertip>
           <Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon>
@@ -39,8 +34,8 @@ module.exports = function wordManifest(config) {
     <Resources>
       <bt:Images><bt:Image id="Icon.16" DefaultValue="${origin}/assets/icon-16.png"/><bt:Image id="Icon.32" DefaultValue="${origin}/assets/icon-32.png"/><bt:Image id="Icon.80" DefaultValue="${origin}/assets/icon-80.png"/></bt:Images>
       <bt:Urls><bt:Url id="Taskpane.Url" DefaultValue="${origin}/word/taskpane.html"/></bt:Urls>
-      <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="文档翻译"/><bt:String id="Open.Label" DefaultValue="翻译选项"/><bt:String id="Selection.Label" DefaultValue="翻译成中文"/><bt:String id="Settings.Label" DefaultValue="翻译设置"/></bt:ShortStrings>
-      <bt:LongStrings><bt:String id="Open.Description" DefaultValue="打开翻译选项，设置目标语言、自动翻译和排除语言。"/><bt:String id="Selection.Description" DefaultValue="将选中文字翻译成简体中文。"/></bt:LongStrings>
+      <bt:ShortStrings><bt:String id="Group.Label" DefaultValue="文档翻译"/><bt:String id="Open.Label" DefaultValue="翻译选项"/><bt:String id="Settings.Label" DefaultValue="翻译设置"/></bt:ShortStrings>
+      <bt:LongStrings><bt:String id="Open.Description" DefaultValue="打开翻译选项，设置目标语言、自动翻译和排除语言。"/></bt:LongStrings>
     </Resources>
     <WebApplicationInfo><Id>${xml(config.clientId)}</Id><Resource>${xml(config.resource)}</Resource><Scopes><Scope>openid</Scope><Scope>profile</Scope><Scope>User.Read</Scope></Scopes></WebApplicationInfo>
   </VersionOverrides>

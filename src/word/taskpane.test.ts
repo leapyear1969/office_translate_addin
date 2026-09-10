@@ -88,6 +88,27 @@ test('a collapsed selection shows guidance and retires the previous preview', as
   expect(button('insert-translation').disabled).toBe(false);
 });
 
+test('an empty paragraph shows a warning and clears the previous preview without translating', async () => {
+  const { capturePreview, captured, translatePreview } = await setup();
+  button('translate-paragraph').click(); await settle();
+  const { EmptySelectionError } = require('./preview');
+  capturePreview.mockRejectedValueOnce(new EmptySelectionError('paragraph'));
+  translatePreview.mockClear();
+  button('translate-paragraph').click(); await settle();
+  expect(button('notification').classList.contains('warning')).toBe(true);
+  expect(button('status').textContent).toContain('当前段落为空');
+  expect(button('status').classList.contains('error')).toBe(false);
+  expect(button('clear-translation-controls').hidden).toBe(true);
+  expect(textarea('source-text').value).toBe('');
+  expect(textarea('translated-text').value).toBe('');
+  expect(button('source-count').textContent).toBe('（0 个字符）');
+  expect(captured.release).toHaveBeenCalledTimes(1);
+  expect(button('insert-translation').disabled).toBe(true);
+  expect(translatePreview).not.toHaveBeenCalled();
+  button('translate-paragraph').click(); await settle();
+  expect(button('insert-translation').disabled).toBe(false);
+});
+
 test('clear controls releases the preview, reports failures and permits retry without authentication', async () => {
   const { clearTranslationControls, captured, authenticate } = await setup();
   button('translate-selection').click(); await settle();

@@ -2,8 +2,8 @@ import { api, authenticate } from '../shared/api';
 import { prepareOoxml } from './ooxml';
 
 export class EmptySelectionError extends Error {
-  constructor() {
-    super('请先选中需要翻译的文字，或在原文框中输入内容。');
+  constructor(scope: 'selection' | 'paragraph' = 'selection') {
+    super(scope === 'paragraph' ? '当前段落为空，请将光标移到有文字的段落，或在原文框中输入内容。' : '请先选中需要翻译的文字，或在原文框中输入内容。');
     this.name = 'EmptySelectionError';
   }
 }
@@ -46,6 +46,11 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
     await syncPreview(context, '读取模板内容控件');
     const candidates = [...(!parent.isNullObject ? [parent] : []), ...contained.items]
       .filter((control, index, all) => all.findIndex(other => other.id === control.id) === index);
+    // Ordinary blank paragraphs have no OOXML to read on some Word hosts.
+    // Keep inspecting controls because their placeholder text can be hidden.
+    if (scope === 'paragraph' && !original.trim() && !candidates.length) {
+      throw new EmptySelectionError(scope);
+    }
     if (!original.trim() || candidates.length) {
       const native = range.getOoxml();
       const exports = candidates.map(control => ({ control, xml: control.getOoxml() }));

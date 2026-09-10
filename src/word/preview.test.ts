@@ -70,6 +70,17 @@ test('a collapsed cursor returns guidance without requesting OOXML that can thro
   expect(context.trackedObjects.add).not.toHaveBeenCalled();
 });
 
+test.each(['', '  \t\r\n'])('blank paragraphs (%j) return guidance without requesting OOXML', async text => {
+  const { range, context } = setup();
+  range.text = text;
+  range.isEmpty = !text;
+  range.getOoxml.mockImplementation(() => { throw new Error('GeneralException'); });
+  await expect(capturePreview('paragraph')).rejects.toThrow(new EmptySelectionError('paragraph'));
+  expect(range.getOoxml).not.toHaveBeenCalled();
+  expect(context.trackedObjects.add).not.toHaveBeenCalled();
+  expect(range.insertText).not.toHaveBeenCalled();
+});
+
 test('preview preserves literal markup and newlines as text', async () => {
   jest.mocked(authenticate).mockResolvedValue({ token: 'token' } as any);
   jest.mocked(api).mockResolvedValue({ html: '<div>&lt;b&gt;译文&lt;/b&gt;\n第二行 &amp; 第三行</div>' });
@@ -115,7 +126,8 @@ test.each(['parent', 'contained'] as const)('visible placeholder text uses its %
 });
 
 test('unresolved template prompts stop before writing instead of falling back to Range.insertText', async () => {
-  const { range } = setup();
+  const { range, control, contained } = setup();
+  contained.items = [control];
   range.text = '';
   range.getOoxml.mockReturnValue({ value: templatePlaceholder });
   await expect(capturePreview('paragraph')).rejects.toThrow('无法定位模板占位内容控件');

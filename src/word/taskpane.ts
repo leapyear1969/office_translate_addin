@@ -119,7 +119,7 @@ async function openPreview(scope: 'selection' | 'paragraph', language: string) {
     if (error instanceof EmptySelectionError) {
       sourceText.value = '';
       element('source-count').textContent = '（0 个字符）';
-      status(error.message);
+      status(error.message, false, false, scope === 'paragraph');
       await releasePreview().catch(() => {});
     } else {
       status((error as Error).message, true);
@@ -158,9 +158,9 @@ function updateDocumentActions() {
     element<HTMLButtonElement>(id).disabled = translating || (signedOut && id.startsWith('translate'));
   });
 }
-function status(message: string, error = false, repairFailed = false) {
+function status(message: string, error = false, repairFailed = false, warning = false) {
   const repair = repairFailed || error && /尚未恢复的翻译|翻译控件.*异常|翻译控件.*损坏/.test(message);
-  const kind = repair ? 'warning' : error ? 'error' : /正在|请|尚未|没有|已注销/.test(message) ? 'info' : 'success';
+  const kind = repair || warning ? 'warning' : error ? 'error' : /正在|请|尚未|没有|已注销/.test(message) ? 'info' : 'success';
   element('notification').hidden = !message;
   element('notification').className = `notification ${kind}`;
   element('status').textContent = repairFailed ? `修复失败：${message}` : repair ? '检测到翻译控件异常，是否修复？' : message;

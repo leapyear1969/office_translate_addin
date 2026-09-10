@@ -8,6 +8,7 @@ import { LANGUAGES } from '../shared/settings';
 import { isWordOnline } from './web-safety';
 import { migrateDocumentBackups } from './backup';
 import { isDesktopWord } from './desktop-copy';
+import { copyTranslation } from './clipboard';
 import { capturePreview, translatePreview, PreviewRange, EmptySelectionError } from './preview';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -387,8 +388,8 @@ Office.onReady(async info => {
 element('dismiss-status').addEventListener('click', () => status(''));
 element('copy-translation').addEventListener('click', async () => {
   if (!translatedText.value) { status('暂无可复制的译文。'); return; }
-  try { await navigator.clipboard.writeText(translatedText.value); status('译文已复制'); }
-  catch { status('复制失败，请选择译文后手动复制。', true); }
+  if (await copyTranslation(translatedText)) status('译文已复制');
+  else status('浏览器未允许自动复制，已选中译文，请按 Ctrl+C（Mac：⌘C）复制。', true);
 });
 element('more-translation').addEventListener('click', () => {
   const menu = element('translation-menu');

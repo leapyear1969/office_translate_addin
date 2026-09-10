@@ -5,17 +5,22 @@ import { wordPackage } from './test-fixtures/package';
 jest.mock('../shared/api');
 
 function setup() {
-  const range = { text: 'Original', isEmpty: false, load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })) };
-  const selection = { ...range, paragraphs: { getFirst: () => ({ getRange: () => range }) } };
+  const control = { isNullObject: true, load: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })), insertText: jest.fn() };
+  const range = { text: 'Original', isEmpty: false, load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })), parentContentControlOrNullObject: control };
+  const paragraph = { getRange: jest.fn((location?: string) => location === 'Content' ? range : {
+    ...range, text: 'Original\r', insertText: jest.fn(() => { throw new Error('GeneralException'); }),
+  }) };
+  const selection = { ...range, paragraphs: { getFirst: () => paragraph } };
   const context = { document: { getSelection: jest.fn(() => selection) }, sync: jest.fn(async () => {}),
     trackedObjects: { add: jest.fn(), remove: jest.fn() } };
   (globalThis as any).Word = { InsertLocation: { replace: 'Replace' }, run: jest.fn(async (...args) => args[args.length - 1](context)) };
-  return { range, selection, context };
+  return { range, selection, context, paragraph, control };
 }
 
 test('captures a paragraph without writing and inserts into the captured range after focus moves', async () => {
-  const { range, context } = setup();
+  const { range, context, paragraph } = setup();
   const preview = await capturePreview('paragraph');
+  expect(paragraph.getRange).toHaveBeenCalledWith('Content');
   expect(preview.text).toBe('Original');
   expect(range.insertText).not.toHaveBeenCalled();
   context.document.getSelection.mockImplementation(() => { throw new Error('selection moved'); });
@@ -23,6 +28,16 @@ test('captures a paragraph without writing and inserts into the captured range a
   expect(range.insertText).toHaveBeenCalledWith('Translated', 'Replace');
   await preview.release(); await preview.release();
   expect(context.trackedObjects.remove).toHaveBeenCalledTimes(1);
+});
+
+test('replacement errors identify the failing step and host location without retrying the write', async () => {
+  const { range, context } = setup();
+  const preview = await capturePreview('paragraph');
+  context.sync.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Object.assign(new Error('GeneralException'), {
+    code: 'GeneralException', debugInfo: { errorLocation: 'Range.insertText' },
+  }));
+  await expect(preview.insert('译文', () => true)).rejects.toThrow('替换原文失败：GeneralException（Range.insertText）');
+  expect(range.insertText).toHaveBeenCalledTimes(1);
 });
 
 test('changed source or cancelled session never overwrites the document', async () => {
@@ -74,4 +89,40 @@ test('preview reads empty-text template controls and checks hidden source edits 
   selection.getOoxml.mockReturnValue({ value: xml });
   await preview.insert('译文', () => true);
   expect(selection.insertText).toHaveBeenCalledWith('译文', 'Replace');
+});
+
+// Modern Living uses hidden rich-text placeholders containing three paragraphs.
+const templatePlaceholder = wordPackage('<w:sdt><w:sdtPr><w:id w:val="1620411488"/><w:showingPlcHdr/></w:sdtPr><w:sdtContent>' +
+  ['First paragraph.', 'Second paragraph.', 'Third paragraph.'].map(text => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`).join('') +
+  '</w:sdtContent></w:sdt>');
+
+test('multi-paragraph template prompts write through the captured content control and detect hidden edits', async () => {
+  const { range, control, context } = setup();
+  range.text = '';
+  range.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  control.isNullObject = false;
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  range.insertText.mockImplementation(() => { throw new Error('GeneralException'); });
+  const preview = await capturePreview('paragraph');
+  expect(preview.text).toBe('First paragraph.\nSecond paragraph.\nThird paragraph.');
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder.replace('Third', 'Edited') });
+  await expect(preview.insert('译文', () => true)).rejects.toThrow('原文范围已更改');
+  expect(control.insertText).not.toHaveBeenCalled();
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  await preview.insert('第一段\n第二段\n第三段', () => true);
+  expect(control.insertText).toHaveBeenCalledWith('第一段\n第二段\n第三段', 'Replace');
+  expect(range.insertText).not.toHaveBeenCalled();
+  await preview.release();
+  expect(context.trackedObjects.remove).toHaveBeenCalledWith(control);
+});
+
+test('a partial placeholder preview cannot overwrite the larger enclosing control', async () => {
+  const { selection, control, context } = setup();
+  selection.text = '';
+  selection.getOoxml.mockReturnValue({ value: wordPackage('<w:p><w:r><w:t>First paragraph.</w:t></w:r></w:p>') });
+  control.isNullObject = false;
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  await expect(capturePreview('selection')).rejects.toThrow('仅包含模板占位内容的一部分');
+  expect(control.insertText).not.toHaveBeenCalled();
+  expect(context.trackedObjects.add).not.toHaveBeenCalled();
 });

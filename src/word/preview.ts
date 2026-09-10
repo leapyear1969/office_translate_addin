@@ -57,15 +57,27 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
         try { placeholderPlan = prepareOoxml(native.value); }
         catch { throw new Error(scope === 'selection' ? '请先选中需要翻译的文字，或选择可翻译的普通模板内容。' : '当前段落没有可安全翻译的文字。'); }
         if (!original.trim()) text = placeholderPlan.paragraphs.map(html => new DOMParser().parseFromString(html, 'text/html').body.textContent || '').join('\n');
-        const matches = prompts.map(item => ({ ...item, plan: prepareOoxml(item.xml.value) }))
-          .filter(item => item.plan.sourceText === placeholderPlan!.sourceText &&
-            JSON.stringify(item.plan.paragraphs) === JSON.stringify(placeholderPlan!.paragraphs));
+        const plans = prompts.map(item => ({ ...item, plan: prepareOoxml(item.xml.value) }));
+        // Range and control exports can split runs differently and include
+        // different empty boundary paragraphs. Neither is a scope identifier.
+        const visibleParagraphs = (plan: ReturnType<typeof prepareOoxml>) => {
+          const paragraphs = JSON.parse(plan.sourceText) as string[];
+          while (paragraphs.length && !paragraphs[0].trim()) paragraphs.shift();
+          while (paragraphs.length && !paragraphs[paragraphs.length - 1].trim()) paragraphs.pop();
+          return JSON.stringify(paragraphs);
+        };
+        // Word treats a multi-paragraph placeholder as one editable prompt.
+        // In paragraph mode preview that entire prompt before replacing it.
+        // Never expand an explicit selection, or choose between several prompts.
+        const matches = scope === 'paragraph' && plans.length === 1 ? plans : plans
+          .filter(item => visibleParagraphs(item.plan) === visibleParagraphs(placeholderPlan!));
         if (prompts.length && matches.length !== 1) {
           throw new Error('当前范围仅包含模板占位内容的一部分，请选中完整占位内容后重新翻译。');
         }
         if (matches.length === 1) {
           placeholderControl = matches[0].control;
           placeholderPlan = matches[0].plan;
+          text = placeholderPlan.paragraphs.map(html => new DOMParser().parseFromString(html, 'text/html').body.textContent || '').join('\n');
         } else if (hasPlaceholder(native.value)) {
           throw new Error('无法定位模板占位内容控件，请选中完整占位内容后重新翻译。');
         }

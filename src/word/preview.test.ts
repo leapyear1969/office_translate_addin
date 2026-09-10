@@ -108,7 +108,7 @@ test.each(['parent', 'contained'] as const)('visible placeholder text uses its %
   else contained.items = [control];
   range.insertText.mockImplementation(() => { throw new Error('GeneralException'); });
   const preview = await capturePreview('paragraph');
-  expect(preview.text).toBe(range.text);
+  expect(preview.text).toBe('First paragraph.\nSecond paragraph.\nThird paragraph.');
   await preview.insert('译文', () => true);
   expect(control.insertText).toHaveBeenCalledWith('译文', 'Replace');
   expect(range.insertText).not.toHaveBeenCalled();
@@ -161,4 +161,40 @@ test('a partial placeholder preview cannot overwrite the larger enclosing contro
   await expect(capturePreview('selection')).rejects.toThrow('仅包含模板占位内容的一部分');
   expect(control.insertText).not.toHaveBeenCalled();
   expect(context.trackedObjects.add).not.toHaveBeenCalled();
+});
+
+test('paragraph mode previews the whole prompt when Word exports only its first paragraph', async () => {
+  const { range, control } = setup();
+  range.text = 'First paragraph.';
+  range.getOoxml.mockReturnValue({ value: wordPackage('<w:p><w:r><w:t>First paragraph.</w:t></w:r></w:p>') });
+  control.isNullObject = false;
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  const preview = await capturePreview('paragraph');
+  expect(preview.text).toBe('First paragraph.\nSecond paragraph.\nThird paragraph.');
+  await preview.insert('第一段\n第二段\n第三段', () => true);
+  expect(control.insertText).toHaveBeenCalledWith('第一段\n第二段\n第三段', 'Replace');
+  expect(range.insertText).not.toHaveBeenCalled();
+});
+
+test('complete selections match despite export run splitting and empty boundary paragraphs', async () => {
+  const { selection, control, contained } = setup();
+  contained.items = [control];
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  selection.getOoxml.mockReturnValue({ value: templatePlaceholder
+    .replace('<w:sdt>', '<w:p/><w:sdt>')
+    .replace('First paragraph.', 'First </w:t></w:r><w:r><w:t>paragraph.') });
+  const preview = await capturePreview('selection');
+  expect(preview.text).toBe('First paragraph.\nSecond paragraph.\nThird paragraph.');
+  await preview.insert('译文', () => true);
+  expect(control.insertText).toHaveBeenCalledWith('译文', 'Replace');
+  expect(selection.insertText).not.toHaveBeenCalled();
+});
+
+test('paragraph mode cannot choose between multiple different placeholder controls', async () => {
+  const { range, control, contained } = setup();
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  contained.items = [control, { ...control, id: 2 }];
+  range.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  await expect(capturePreview('paragraph')).rejects.toThrow('请选中完整占位内容');
+  expect(control.insertText).not.toHaveBeenCalled();
 });

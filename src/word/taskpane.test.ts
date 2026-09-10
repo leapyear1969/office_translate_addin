@@ -20,7 +20,7 @@ async function setup(mode = 'never', excluded: string[] = [], web = false) {
   const api = jest.fn(async () => ({ language: 'en', score: 1 }));
   const authenticate = jest.fn(async () => ({ token: 'token', user: { displayName: 'User', mail: 'user@example.com' } }));
   jest.doMock('./document', () => ({ translateDocument, restoreOriginalBody, clearTranslationControls }));
-  jest.doMock('../shared/api', () => ({ api, authenticate }));
+  jest.doMock('../shared/api', () => ({ api, authenticate, clearAuthentication: jest.fn() }));
   const requestConsent = jest.fn(async () => 'https://example.com/auth');
   jest.doMock('../shared/consent', () => ({ requestConsent }));
   let saved: unknown = { mode, target: 'ja', excluded };

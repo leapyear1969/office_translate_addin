@@ -88,7 +88,7 @@ async function setup(context?: unknown, mode = 'never', language = 'zh-Hans', de
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'taskpane.html'), 'utf8');
   const api = jest.fn(async (path: string) => path === '/api/detect' ? { language: 'en', score: 1 } : { html: '<p>译文</p>' });
   const authenticate = jest.fn(async () => ({ token: 'token', user: { id: 'u', displayName: 'User', mail: 'u@example.com' } }));
-  jest.doMock('../shared/api', () => ({ api, authenticate }));
+  jest.doMock('../shared/api', () => ({ api, authenticate, clearAuthentication: jest.fn() }));
   const requestConsent = jest.fn(async () => 'https://addin.example/consent.html#state=test');
   jest.doMock('../shared/consent', () => ({ requestConsent }));
   const handlers: Record<string, Function> = {};

@@ -4,6 +4,27 @@ declare const OfficeRuntime: { auth: { getAccessToken(options: { allowSignInProm
 
 let pendingToken: Promise<string> | undefined;
 let pendingSession: Promise<Session> | undefined;
+let cachedSession: { session: Session; expiresAt: number } | undefined;
+let sessionEpoch = 0;
+
+// Reuse successful authentication briefly during live previews. Keep credentials
+// in this runtime only; JWT claims here are a cache hint, never identity validation.
+function sessionExpiresAt(token: string): number {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const { exp } = JSON.parse(atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, '=')));
+    if (typeof exp === 'number' && Number.isFinite(exp)) {
+      return Math.min(Date.now() + 300000, exp * 1000 - 60000);
+    }
+  } catch { /* Unknown token formats must not be cached. */ }
+  return 0;
+}
+
+export function clearAuthentication(): void {
+  cachedSession = undefined;
+  ++sessionEpoch;
+  // Do not unlock native SSO requests or reset a host-imposed cooldown.
+}
 let retryAfter = 0;
 let cooldownMs = 60000;
 function throttled() {
@@ -37,6 +58,7 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
     });
+    if (response.status === 401 && cachedSession?.session.token === token) clearAuthentication();
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error || `请求失败（${response.status}）。`), { code: result.code });
     return result as T;
@@ -47,9 +69,18 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
 }
 
 export function authenticate(interactive = true): Promise<Session> {
+  if (cachedSession && Date.now() < cachedSession.expiresAt) return Promise.resolve(cachedSession.session);
+  cachedSession = undefined;
   // The first caller determines prompt permissions; automatic work must never
   // upgrade an in-flight silent request into an interactive request.
-  if (!pendingSession) pendingSession = authenticateOnce(interactive).finally(() => { pendingSession = undefined; });
+  if (!pendingSession) {
+    const epoch = sessionEpoch;
+    pendingSession = authenticateOnce(interactive).then(session => {
+      if (epoch !== sessionEpoch) throw new Error('登录状态已变更，请重新登录。');
+      cachedSession = { session, expiresAt: sessionExpiresAt(session.token) };
+      return session;
+    }).finally(() => { pendingSession = undefined; });
+  }
   return pendingSession;
 }
 

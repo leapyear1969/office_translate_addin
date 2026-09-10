@@ -1,4 +1,5 @@
 const originalFetch = global.fetch;
+const jwt = (expiresInSeconds = 3600) => `header.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + expiresInSeconds })).toString('base64url')}.signature`;
 beforeEach(() => {
   jest.resetModules();
   (global as any).OfficeRuntime = { auth: { getAccessToken: jest.fn().mockResolvedValue('sso-token') } };
@@ -78,4 +79,69 @@ test('timeout does not unlock a native SSO request that is still running', async
     resolve('token');
     await expect(second).resolves.toMatchObject({ token: 'token' });
   } finally { jest.useRealTimers(); }
+});
+
+test('sequential translation authentication reuses successful sign-in and profile', async () => {
+  const token = jwt();
+  const getToken = (global as any).OfficeRuntime.auth.getAccessToken.mockResolvedValue(token);
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'user' }) });
+  const { authenticate } = await import('./api');
+  await authenticate(false);
+  for (let index = 0; index < 10; index++) await authenticate(false);
+  expect(getToken).toHaveBeenCalledTimes(1);
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+});
+
+test.each([120, 3600])('refreshes at expiry safety margin or five-minute limit (lifetime %s)', async lifetime => {
+  jest.useFakeTimers();
+  try {
+    const getToken = (global as any).OfficeRuntime.auth.getAccessToken.mockImplementation(async () => jwt(lifetime));
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'user' }) });
+    const { authenticate } = await import('./api');
+    await authenticate();
+    jest.advanceTimersByTime(Math.min(lifetime - 60, 300) * 1000 - 1000);
+    await authenticate(false);
+    expect(getToken).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(1000);
+    await authenticate(false);
+    expect(getToken).toHaveBeenCalledTimes(2);
+  } finally { jest.useRealTimers(); }
+});
+
+test('sign-out clears reuse and prevents pending sign-in from restoring the session', async () => {
+  const getToken = (global as any).OfficeRuntime.auth.getAccessToken.mockResolvedValue(jwt());
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'user' }) });
+  const { authenticate, clearAuthentication } = await import('./api');
+  await authenticate();
+  clearAuthentication();
+  let resolve!: (token: string) => void;
+  getToken.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  const pending = authenticate();
+  await Promise.resolve();
+  clearAuthentication();
+  resolve(jwt());
+  await expect(pending).rejects.toThrow('登录状态已变更');
+  await authenticate();
+  expect(getToken).toHaveBeenCalledTimes(3);
+});
+
+test('401 invalidates the matching session without automatically replaying API work', async () => {
+  const getToken = (global as any).OfficeRuntime.auth.getAccessToken.mockResolvedValue(jwt());
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'user' }) });
+  const { authenticate, api } = await import('./api');
+  const session = await authenticate();
+  (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ error: 'expired' }) });
+  await expect(api('/api/translate', session.token, {})).rejects.toThrow('expired');
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  await authenticate();
+  expect(getToken).toHaveBeenCalledTimes(2);
+});
+
+test.each(['opaque', 'header.e30.signature'])('does not cache tokens without a usable expiry: %s', async token => {
+  const getToken = (global as any).OfficeRuntime.auth.getAccessToken.mockResolvedValue(token);
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'user' }) });
+  const { authenticate } = await import('./api');
+  await authenticate();
+  await authenticate();
+  expect(getToken).toHaveBeenCalledTimes(2);
 });

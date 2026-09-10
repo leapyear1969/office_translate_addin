@@ -1,4 +1,4 @@
-import { UserProfile } from './api';
+import { clearAuthentication, UserProfile } from './api';
 
 export function setupAccount(onSignOut: () => void) {
   const avatar = document.getElementById('account-avatar') as HTMLButtonElement;
@@ -27,7 +27,7 @@ export function setupAccount(onSignOut: () => void) {
     if (event.relatedTarget && !avatar.parentElement!.contains(event.relatedTarget as Node)) close();
   });
   photo.addEventListener('error', () => { photo.hidden = true; initial.hidden = false; });
-  signout.addEventListener('click', () => { onSignOut(); close(true); });
+  signout.addEventListener('click', () => { clearAuthentication(); onSignOut(); close(true); });
   return {
     close,
     render(user?: UserProfile) {

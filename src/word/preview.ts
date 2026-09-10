@@ -37,27 +37,38 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
     let placeholderPlan: ReturnType<typeof prepareOoxml> | undefined;
     let placeholderControl: Word.ContentControl | undefined;
     let text = original;
-    if (!original.trim()) {
+    // Placeholder text is not consistently empty across Word hosts. A range
+    // enclosing the control also has no parent, so inspect contained controls.
+    const parent = range.parentContentControlOrNullObject;
+    const contained = range.contentControls;
+    parent.load('isNullObject,id');
+    contained.load('items/id');
+    await syncPreview(context, '读取模板内容控件');
+    const candidates = [...(!parent.isNullObject ? [parent] : []), ...contained.items]
+      .filter((control, index, all) => all.findIndex(other => other.id === control.id) === index);
+    if (!original.trim() || candidates.length) {
       const native = range.getOoxml();
-      await context.sync();
-      try { placeholderPlan = prepareOoxml(native.value); }
-      catch { throw new Error(scope === 'selection' ? '请先选中需要翻译的文字，或选择可翻译的普通模板内容。' : '当前段落没有可安全翻译的文字。'); }
-      text = placeholderPlan.paragraphs.map(html => new DOMParser().parseFromString(html, 'text/html').body.textContent || '').join('\n');
-      // A template placeholder can expose several visible paragraphs as one
-      // empty range. Replace through its control, not a range inside the prompt.
-      const parent = range.parentContentControlOrNullObject;
-      parent.load('isNullObject');
-      await syncPreview(context, '读取模板内容控件');
-      if (!parent.isNullObject) {
-        const nativeControl = parent.getOoxml();
-        await syncPreview(context, '读取模板占位内容');
-        const controlPlan = prepareOoxml(nativeControl.value);
-        if (controlPlan.sourceText !== placeholderPlan.sourceText ||
-            JSON.stringify(controlPlan.paragraphs) !== JSON.stringify(placeholderPlan.paragraphs)) {
+      const exports = candidates.map(control => ({ control, xml: control.getOoxml() }));
+      await syncPreview(context, '读取模板占位内容');
+      const hasPlaceholder = (xml: string) => new DOMParser().parseFromString(xml, 'application/xml')
+        .getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'showingPlcHdr').length > 0;
+      const prompts = exports.filter(item => hasPlaceholder(item.xml.value));
+      if (!original.trim() || prompts.length || hasPlaceholder(native.value)) {
+        try { placeholderPlan = prepareOoxml(native.value); }
+        catch { throw new Error(scope === 'selection' ? '请先选中需要翻译的文字，或选择可翻译的普通模板内容。' : '当前段落没有可安全翻译的文字。'); }
+        if (!original.trim()) text = placeholderPlan.paragraphs.map(html => new DOMParser().parseFromString(html, 'text/html').body.textContent || '').join('\n');
+        const matches = prompts.map(item => ({ ...item, plan: prepareOoxml(item.xml.value) }))
+          .filter(item => item.plan.sourceText === placeholderPlan!.sourceText &&
+            JSON.stringify(item.plan.paragraphs) === JSON.stringify(placeholderPlan!.paragraphs));
+        if (prompts.length && matches.length !== 1) {
           throw new Error('当前范围仅包含模板占位内容的一部分，请选中完整占位内容后重新翻译。');
         }
-        placeholderControl = parent;
-        placeholderPlan = controlPlan;
+        if (matches.length === 1) {
+          placeholderControl = matches[0].control;
+          placeholderPlan = matches[0].plan;
+        } else if (hasPlaceholder(native.value)) {
+          throw new Error('无法定位模板占位内容控件，请选中完整占位内容后重新翻译。');
+        }
       }
     }
     context.trackedObjects.add(range);
@@ -84,7 +95,7 @@ export async function capturePreview(scope: 'selection' | 'paragraph'): Promise<
           }
           if (placeholderControl) placeholderControl.insertText(text, Word.InsertLocation.replace);
           else range.insertText(text, Word.InsertLocation.replace);
-          await syncPreview(ctx, '替换原文');
+          await syncPreview(ctx, placeholderControl ? '替换模板控件原文' : '替换原文');
         });
       },
       async release() {

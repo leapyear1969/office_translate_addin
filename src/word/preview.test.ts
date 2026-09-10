@@ -5,8 +5,9 @@ import { wordPackage } from './test-fixtures/package';
 jest.mock('../shared/api');
 
 function setup() {
-  const control = { isNullObject: true, load: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })), insertText: jest.fn() };
-  const range = { text: 'Original', isEmpty: false, load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })), parentContentControlOrNullObject: control };
+  const control = { id: 1, isNullObject: true, load: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })), insertText: jest.fn() };
+  const contained = { items: [] as typeof control[], load: jest.fn() };
+  const range = { text: 'Original', isEmpty: false, load: jest.fn(), insertText: jest.fn(), getOoxml: jest.fn(() => ({ value: wordPackage('<w:p/>') })), parentContentControlOrNullObject: control, contentControls: contained };
   const paragraph = { getRange: jest.fn((location?: string) => location === 'Content' ? range : {
     ...range, text: 'Original\r', insertText: jest.fn(() => { throw new Error('GeneralException'); }),
   }) };
@@ -14,7 +15,7 @@ function setup() {
   const context = { document: { getSelection: jest.fn(() => selection) }, sync: jest.fn(async () => {}),
     trackedObjects: { add: jest.fn(), remove: jest.fn() } };
   (globalThis as any).Word = { InsertLocation: { replace: 'Replace' }, run: jest.fn(async (...args) => args[args.length - 1](context)) };
-  return { range, selection, context, paragraph, control };
+  return { range, selection, context, paragraph, control, contained };
 }
 
 test('captures a paragraph without writing and inserts into the captured range after focus moves', async () => {
@@ -77,10 +78,12 @@ test('preview preserves literal markup and newlines as text', async () => {
 });
 
 test('preview reads empty-text template controls and checks hidden source edits before insertion', async () => {
-  const { selection } = setup();
+  const { selection, control, contained } = setup();
   selection.text = '';
   const xml = wordPackage('<w:p><w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:t>Sample</w:t></w:r></w:sdtContent></w:sdt></w:p>');
   selection.getOoxml.mockReturnValue({ value: xml });
+  contained.items = [control];
+  control.getOoxml.mockImplementation(() => selection.getOoxml());
   const preview = await capturePreview('selection');
   expect(preview.text).toBe('Sample');
   selection.getOoxml.mockReturnValue({ value: xml.replace('Sample', 'Changed') });
@@ -88,13 +91,46 @@ test('preview reads empty-text template controls and checks hidden source edits 
   expect(selection.insertText).not.toHaveBeenCalled();
   selection.getOoxml.mockReturnValue({ value: xml });
   await preview.insert('译文', () => true);
-  expect(selection.insertText).toHaveBeenCalledWith('译文', 'Replace');
+  expect(control.insertText).toHaveBeenCalledWith('译文', 'Replace');
 });
 
 // Modern Living uses hidden rich-text placeholders containing three paragraphs.
 const templatePlaceholder = wordPackage('<w:sdt><w:sdtPr><w:id w:val="1620411488"/><w:showingPlcHdr/></w:sdtPr><w:sdtContent>' +
   ['First paragraph.', 'Second paragraph.', 'Third paragraph.'].map(text => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`).join('') +
   '</w:sdtContent></w:sdt>');
+
+test.each(['parent', 'contained'] as const)('visible placeholder text uses its %s control, even when Range.text is populated', async location => {
+  const { range, control, contained } = setup();
+  range.text = 'First paragraph.\rSecond paragraph.\rThird paragraph.';
+  range.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  if (location === 'parent') control.isNullObject = false;
+  else contained.items = [control];
+  range.insertText.mockImplementation(() => { throw new Error('GeneralException'); });
+  const preview = await capturePreview('paragraph');
+  expect(preview.text).toBe(range.text);
+  await preview.insert('译文', () => true);
+  expect(control.insertText).toHaveBeenCalledWith('译文', 'Replace');
+  expect(range.insertText).not.toHaveBeenCalled();
+});
+
+test('unresolved template prompts stop before writing instead of falling back to Range.insertText', async () => {
+  const { range } = setup();
+  range.text = '';
+  range.getOoxml.mockReturnValue({ value: templatePlaceholder });
+  await expect(capturePreview('paragraph')).rejects.toThrow('无法定位模板占位内容控件');
+  expect(range.insertText).not.toHaveBeenCalled();
+});
+
+test('ordinary content controls retain partial-range replacement', async () => {
+  const { range, control } = setup();
+  control.isNullObject = false;
+  control.getOoxml.mockReturnValue({ value: templatePlaceholder.replace('<w:showingPlcHdr/>', '') });
+  const preview = await capturePreview('paragraph');
+  await preview.insert('译文', () => true);
+  expect(range.insertText).toHaveBeenCalledWith('译文', 'Replace');
+  expect(control.insertText).not.toHaveBeenCalled();
+});
 
 test('multi-paragraph template prompts write through the captured content control and detect hidden edits', async () => {
   const { range, control, context } = setup();

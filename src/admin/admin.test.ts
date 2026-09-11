@@ -30,6 +30,18 @@ beforeEach(() => {
     : url === '/api/admin/session' ? { tenants: ['t'] } : payload })) as any;
 });
 afterEach(() => { global.fetch = originalFetch; });
+
+test('global administrator defaults to all tenants and can filter a tenant', async () => {
+  (global.fetch as jest.Mock).mockImplementation(async (url: string) => ({ ok: true, json: async () => url === '/admin/config'
+    ? { configured: true, scope: 's' } : url === '/api/admin/session' ? { tenants: ['*'] } : payload }));
+  await import('./admin'); await settle();
+  const tenant = document.querySelector<HTMLInputElement>('input#tenant')!;
+  expect(tenant.placeholder).toContain('所有租户');
+  expect(new URL((global.fetch as jest.Mock).mock.calls.at(-1)[0], 'http://localhost').searchParams.get('tenant')).toBe('');
+  tenant.value = '11111111-1111-1111-1111-111111111111';
+  document.getElementById('filters')!.dispatchEvent(new Event('submit', { cancelable: true })); await settle();
+  expect((global.fetch as jest.Mock).mock.calls.at(-1)[0]).toContain(`tenant=${tenant.value}`);
+});
 test('renders real report response safely, sends filters, and hides stale data on query failure', async () => {
   await import('./admin'); await settle();
   expect(document.getElementById('report')!.hidden).toBe(false);

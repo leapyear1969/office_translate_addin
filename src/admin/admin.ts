@@ -135,7 +135,12 @@ async function main() {
   el('account').textContent = msal.getActiveAccount()?.username || '';
   el('login').textContent = '重新登录'; el('logout').hidden = false;
   const access = await get('/api/admin/session');
-  for (const tenant of access.tenants) { const option = document.createElement('option'); option.value = tenant; option.textContent = tenant; el('tenant').append(option); }
+  if (access.tenants.includes('*')) {
+    const tenant = document.createElement('input'); tenant.id = 'tenant'; tenant.placeholder = '所有租户（可输入租户 ID 筛选）';
+    tenant.setAttribute('aria-label', '租户 ID，留空查询所有租户'); el('tenant').replaceWith(tenant);
+  } else {
+    for (const tenant of access.tenants) { const option = document.createElement('option'); option.value = tenant; option.textContent = tenant; el('tenant').append(option); }
+  }
   el('workspace').hidden = false;
   el('filters').onsubmit = event => { event.preventDefault(); page = 1; collect(); void load(); };
   el('previous').onclick = () => { page--; void load(); }; el('next').onclick = () => { page++; void load(); };

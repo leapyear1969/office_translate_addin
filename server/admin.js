@@ -5,7 +5,7 @@ function parseAdmins(text = '[]') {
   const entries = JSON.parse(text);
   if (!Array.isArray(entries) || entries.some(e => !e || !guid(e.tenant_id) || !(e.user_oid !== undefined
     ? guid(e.user_oid) && e.email === undefined : typeof e.email === 'string' && /^[^\s@]+@[^\s@]+$/.test(e.email))
-    || !Array.isArray(e.tenants) || !e.tenants.length || e.tenants.some(t => !guid(t)))) throw new Error('Invalid ANALYTICS_ADMINS');
+    || !Array.isArray(e.tenants) || !e.tenants.length || e.tenants.some(t => t !== '*' && !guid(t)))) throw new Error('Invalid ANALYTICS_ADMINS');
   return entries.map(e => ({ tenant_id: e.tenant_id.toLowerCase(), ...(e.user_oid ? { user_oid:e.user_oid.toLowerCase() } : { email:e.email.toLowerCase() }), tenants: e.tenants.map(t => t.toLowerCase()) }));
 }
 function allowedTenants(identity, admins = []) {
@@ -18,7 +18,8 @@ function filters(query, tenants, now = Date.now()) {
   const dateValid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
   if (!dateValid(from) || !dateValid(to) || from > to || from < cutoff(now) || to > day(now)) throw bad('请选择保留期内的日期，截止日期不能晚于今天。');
   const tenant = string('tenant').toLowerCase(), host = string('host'), clientType = string('client_type'), userOid = string('user_oid'), search = string('search').trim();
-  if (tenant && !tenants.includes(tenant)) throw Object.assign(new Error('无权查询此租户。'), { status: 403 });
+  if (tenant && !tenants.includes('*') && !tenants.includes(tenant)) throw Object.assign(new Error('无权查询此租户。'), { status: 403 });
+  if (tenant && !guid(tenant)) throw bad('租户 ID 格式无效。');
   if (host && !['word', 'outlook', 'unknown'].includes(host)) throw bad('平台无效。');
   if (clientType && !['online', 'local', 'unknown'].includes(clientType)) throw bad('客户端类型无效。');
   if (userOid.length > 100 || search.length > 100) throw bad('搜索内容过长。');

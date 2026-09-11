@@ -3,6 +3,20 @@ const { parseAdmins, filters } = require('./admin');
 const tid = '11111111-1111-1111-1111-111111111111', oid = '22222222-2222-2222-2222-222222222222';
 const admins = parseAdmins(JSON.stringify([{ tenant_id: tid, user_oid: oid, tenants: [tid] }]));
 const { day } = require('./analytics-store');
+
+test('global grants require a configured identity and allow explicit tenant filtering', () => {
+  const { allowedTenants } = require('./admin');
+  for (const identity of [{ user_oid: oid }, { email: 'admin@example.invalid' }]) {
+    expect(parseAdmins(JSON.stringify([{ tenant_id: tid, ...identity, tenants: ['*'] }]))[0].tenants).toEqual(['*']);
+  }
+  const globalAdmins = parseAdmins(JSON.stringify([{ tenant_id: tid, user_oid: oid, tenants: ['*'] }]));
+  expect(allowedTenants({tid,oid},globalAdmins)).toEqual(['*']);
+  expect(allowedTenants({tid,oid:tid},globalAdmins)).toEqual([]);
+  expect(filters({}, ['*']).tenants).toEqual(['*']);
+  expect(filters({tenant:oid}, ['*']).tenants).toEqual([oid]);
+  expect(() => filters({tenant:'*'}, [tid])).toThrow();
+  expect(() => filters({tenant:'invalid'}, ['*'])).toThrow();
+});
 test('configuration and filters fail closed', () => {
   expect(() => parseAdmins('[{"tenants":["*"]}]')).toThrow();
   expect(() => parseAdmins(JSON.stringify([{tenant_id:tid,user_oid:'bad',email:'admin@example.invalid',tenants:[tid]}]))).toThrow();

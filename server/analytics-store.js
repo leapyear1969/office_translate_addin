@@ -58,8 +58,9 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
     });
   }
   function where(f, translations = false) {
-    const args = [f.from,f.to,f.tenants], terms = ['a.date BETWEEN $1 AND $2','a.tenant_id = ANY($3::text[])'];
+    const args = [f.from,f.to], terms = ['a.date BETWEEN $1 AND $2'];
     const bind = value => { args.push(value); return `$${args.length}`; };
+    if (!f.tenants.includes('*')) terms.push(`a.tenant_id = ANY(${bind(f.tenants)}::text[])`);
     for (const [field,value] of [['host',f.host],['client_type',f.clientType],['user_oid',f.userOid]]) if (value) terms.push(`a.${field}=${bind(value)}`);
     if (f.search) { const b = bind(`%${f.search.replace(/[\\%_]/g, '\\$&')}%`); terms.push(`(u.display_name ILIKE ${b} ESCAPE '\\' OR u.mail ILIKE ${b} ESCAPE '\\')`); }
     if (translations) terms.push("a.layer='business' AND a.endpoint IN ('translate','translate-word')");

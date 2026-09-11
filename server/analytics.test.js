@@ -29,6 +29,20 @@ test('keeps layer totals separate, counts UTF-16, and preserves start-day min/ma
   expect(result.totals.find(r=>r.layer==='upstream')).toMatchObject({requests:3,submitted_units:9,failures:1});
   expect((await store.query(filter,'usage')).users[0]).toMatchObject({first_used_at:earlier,last_used_at:now,days:2});
 });
+
+test('global reports include new tenants while explicit tenant filters remain scoped',async()=>{
+  await store.record(base);
+  const all = {...filter,tenants:['*'],host:'word'};
+  expect((await store.query(all,'usage')).summary.users).toBe(1);
+  await store.record({...base,tenantId:'tenant-b'});
+  const report=await store.query(all,'usage');
+  expect(report.summary).toEqual({requests:2,users:2});
+  expect(report.users.map(u=>u.tenant_id).sort()).toEqual(['tenant-a','tenant-b']);
+  expect(report.activeDaily[today]).toBe(2);
+  expect((await store.query(all,'api')).totals[0].requests).toBe(2);
+  expect((await store.query(filter,'usage')).summary.users).toBe(1);
+  expect((await store.query({...all,tenants:[]},'usage')).summary.users).toBe(0);
+});
 test('literal search, pagination, empty grants and tenant isolation apply to report sections',async()=>{
   for(const tenantId of ['tenant-a','tenant-b']){
     await store.record({...base,tenantId});await store.profile({tenantId,userOid:'user-a',displayName:'A% User',mail:'same@example.com'});

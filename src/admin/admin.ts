@@ -15,13 +15,13 @@ const time = (value: unknown) => value ? new Date(Number(value)).toLocaleString(
 const date = (value: number) => new Date(value + 8 * 3600000).toISOString().slice(0, 10);
 const label = (value: unknown) => ({ word: 'Word', outlook: 'Outlook', online: 'Web页面', local: '桌面客户端', unknown: '未识别', business: '后端业务', upstream: '上游服务' }[String(value)] || String(value || '未获取'));
 function status(message = '', error = false) { el('status').textContent = message; el('status').className = error ? 'error' : ''; }
-function table(target: string, headers: string[], rows: (string | number)[][]) {
+function table(target: string, headers: string[], rows: (string | number)[][], centeredColumns: number[] = []) {
   const container = el(target); container.replaceChildren();
   if (!rows.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = '所选范围内暂无已观测记录'; container.append(p); return; }
   const table = document.createElement('table'), head = document.createElement('thead'), tr = document.createElement('tr'), body = document.createElement('tbody');
-  for (const title of headers) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = title; tr.append(th); }
+  for (const [index, title] of headers.entries()) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = title; if (centeredColumns.includes(index)) th.className = 'centered'; tr.append(th); }
   head.append(tr); table.append(head, body);
-  for (const row of rows) { const tr = document.createElement('tr'); for (const value of row) { const td = document.createElement('td'); td.textContent = typeof value === 'number' ? fmt(value) : value; if (typeof value === 'number') td.className = 'numeric'; tr.append(td); } body.append(tr); }
+  for (const row of rows) { const tr = document.createElement('tr'); for (const [index, value] of row.entries()) { const td = document.createElement('td'); td.textContent = typeof value === 'number' ? fmt(value) : value; if (typeof value === 'number') td.className = 'numeric'; if (centeredColumns.includes(index)) td.classList.add('centered'); tr.append(td); } body.append(tr); }
   container.append(table);
 }
 function cards(items: [string, number, string][]) {
@@ -84,13 +84,13 @@ function render(data: Row) {
   if (isApi) {
     const find = (layer: string) => data.totals.find((r: Row) => r.layer === layer)?.requests || 0;
     cards([['后端业务请求', find('business'), '检测与翻译，含自动预检'], ['上游实际请求', find('upstream'), '每次真实尝试，含分批与修复']]);
-    table('interfaces', ['层级', '接口', '请求数', '成功', '失败', '提交文本量（UTF-16）'], data.interfaces.map((r: Row) => [label(r.layer), r.endpoint, r.requests, r.successes, r.failures, r.layer === 'upstream' ? r.submitted_units : '不重复计量']));
-    table('platforms', ['平台', '客户端', '层级', '请求数'], data.platforms.map((r: Row) => [label(r.host), label(r.client_type), label(r.layer), r.requests]));
-    table('users', ['姓名', '邮箱', '租户 / 账号', '后端请求', '上游请求'], data.users.map((r: Row) => [r.display_name || '未获取', r.mail || '未获取', `${r.tenant_id} / ${r.user_oid}`, r.business, r.upstream]));
+    table('interfaces', ['层级', '接口', '请求数', '成功', '失败', '提交文本量（UTF-16）'], data.interfaces.map((r: Row) => [label(r.layer), r.endpoint, r.requests, r.successes, r.failures, r.layer === 'upstream' ? r.submitted_units : '不重复计量']), [2, 3, 4, 5]);
+    table('platforms', ['平台', '客户端', '层级', '请求数'], data.platforms.map((r: Row) => [label(r.host), label(r.client_type), label(r.layer), r.requests]), [3]);
+    table('users', ['姓名', '邮箱', '租户 / 账号', '后端请求', '上游请求'], data.users.map((r: Row) => [r.display_name || '未获取', r.mail || '未获取', `${r.tenant_id} / ${r.user_oid}`, r.business, r.upstream]), [3, 4]);
   } else {
     cards([['期间使用人数', data.summary.users, '按已验证账号去重'], ['翻译请求次数', data.summary.requests, '包含自动预览刷新与失败请求']]);
-    table('platforms', ['平台', '客户端', '使用人数', '翻译请求'], data.platforms.map((r: Row) => [label(r.host), label(r.client_type), r.users, r.requests]));
-    table('users', ['姓名', '邮箱', '租户 / 账号', '首次观测使用', '最近观测使用', '使用天数', '翻译请求', '期间平台 / 客户端'], data.users.map((r: Row) => [r.display_name || '未获取', r.mail || '未获取', `${r.tenant_id} / ${r.user_oid}`, time(r.first_used_at), time(r.last_used_at), r.days, r.requests, r.platforms]));
+    table('platforms', ['平台', '客户端', '使用人数', '翻译请求'], data.platforms.map((r: Row) => [label(r.host), label(r.client_type), r.users, r.requests]), [2, 3]);
+    table('users', ['姓名', '邮箱', '租户 / 账号', '首次观测使用', '最近观测使用', '使用天数', '翻译请求', '期间平台 / 客户端'], data.users.map((r: Row) => [r.display_name || '未获取', r.mail || '未获取', `${r.tenant_id} / ${r.user_oid}`, time(r.first_used_at), time(r.last_used_at), r.days, r.requests, String(r.platforms || '').split(', ').map(platform => platform.split(' / ').map(label).join(' / ')).join(', ')]), [5, 6]);
   }
   trend(data, currentParams.get('from')!, currentParams.get('to')!);
   el('user-count').textContent = `${fmt(data.totalUsers)} 位用户`;

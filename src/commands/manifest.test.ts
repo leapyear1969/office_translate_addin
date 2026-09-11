@@ -8,7 +8,7 @@ function generatedManifest(): string {
 }
 
 test.each(['checked-in', 'generated'])('%s manifest exposes only translation and options menu items', source => {
-  const xml = source === 'generated' ? generatedManifest() : readFileSync(join(root, 'manifest.xml'), 'utf8');
+  const xml = source === 'generated' ? generatedManifest() : readFileSync(join(root, 'manifest.outlook.xml'), 'utf8');
   const $ = load(xml, { xmlMode: true });
   const menus = $('Control[id="Translation.Menu"]');
   expect(menus.length).toBe(2);

@@ -1,4 +1,5 @@
 const cheerio = require('cheerio/slim');
+const { recordRequest } = require('./analytics');
 
 function content(html) {
   const $ = cheerio.load(html, { xml: { xmlMode: false, decodeEntities: true, encodeEntities: 'utf8' } });
@@ -70,6 +71,8 @@ function createTranslator(config) {
     if (textType) url.searchParams.set('textType', textType);
     const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': config.translatorKey };
     if (config.translatorRegion) headers['Ocp-Apim-Subscription-Region'] = config.translatorRegion;
+    const started = Date.now(); let success = false;
+    try {
     const response = await fetch(url, {
       method: 'POST', headers, body: JSON.stringify(text.map(Text => ({ Text }))),
       signal: AbortSignal.timeout(25000),
@@ -80,7 +83,14 @@ function createTranslator(config) {
           : `翻译服务暂时不可用（HTTP ${response.status}）。`;
       throw Object.assign(new Error(message), { status: 502 });
     }
-    return response.json();
+    const result = await response.json();
+    const valid = Array.isArray(result) && result.length === text.length && result.every(item => method === 'detect'
+      ? typeof item?.language === 'string' && typeof item?.score === 'number'
+      : Array.isArray(item?.translations) && typeof item.translations[0]?.text === 'string');
+    if (!valid) throw new Error('翻译结果不完整，翻译服务响应格式无效');
+    success = true;
+    return result;
+    } finally { recordRequest('upstream', method, started, success, text.reduce((sum, value) => sum + value.length, 0)); }
   }
   return {
     translateWord: async (paragraphs, to) => {

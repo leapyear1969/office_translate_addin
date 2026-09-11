@@ -12,6 +12,7 @@ module.exports = async (env = {}, argv) => {
 
   return {
     entry: {
+      admin: "./src/admin/admin.ts",
       commands: "./src/commands/commands.ts",
       taskpane: "./src/taskpane/taskpane.ts",
       original: "./src/taskpane/original.ts",
@@ -37,6 +38,8 @@ module.exports = async (env = {}, argv) => {
       ],
     },
     plugins: [
+      new HtmlWebpackPlugin({ filename: "admin.html", template: "./src/admin/admin.html", chunks: ["admin"], publicPath: "/", inject: "body" }),
+      new CopyWebpackPlugin({ patterns: [{ from: "src/admin/admin.css", to: "admin.css" }] }),
       new HtmlWebpackPlugin({ filename: "word/taskpane.html", template: "./src/word/taskpane.html", chunks: ["word/taskpane"], inject: "body" }),
       new HtmlWebpackPlugin({
         filename: "commands.html",

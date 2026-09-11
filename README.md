@@ -160,7 +160,11 @@ npm run validate
 4. 推荐设置 `NODE_ENV=production`，由反向代理终止 HTTPS 并转发到 `127.0.0.1:PORT`。也可配置 `SSL_CERT_PATH` 和 `SSL_KEY_PATH` 直接提供 HTTPS。
 5. 重启 Node 服务。不要把 `.env`、源目录或密钥当静态资源发布；本服务器仅发布 `dist`。
 
-后端限流当前为每 IP 每分钟 60 次。生产环境多个实例或反向代理需要按实际网络配置共享限流存储与代理信任，当前本地默认不信任转发头。
+后端业务限流为每 IP 每分钟 60 次，管理查询单独为每 IP 每分钟 120 次。反向代理需要按实际网络配置代理信任，当前本地默认不信任转发头。V2 使用 PostgreSQL，并按单实例后端部署。
+
+### V2 使用统计后台
+
+`/admin/usage` 查看用户、Word / Outlook 及 online / local 分布；`/admin/api` 查看后端和上游请求用量。浏览器登录默认复用现有 Entra 应用，需添加 SPA 回调地址并配置真实管理员白名单，默认不授予任何查询权限。PostgreSQL 配置、统计覆盖限制和离线删除命令见 [V2 部署与验收](docs/usage-analytics-v2-deployment.md)。
 
 ### Word 网页版 OOXML 导出兼容
 - 仅选中文字/当前段落翻译：当原文 `getOoxml()` 返回 `ooxmlIsMalformed` / `ooxmlIsMalformated` / `InvalidOoxml` 时，改用已读取的该范围 HTML 保存原文。全文翻译不使用此回退。其他导出错误仍中止，不对写入错误自动重试。

@@ -3,12 +3,27 @@ const { rateLimit } = require('express-rate-limit');
 const { createAuth } = require('./auth');
 const { createTranslator } = require('./translator');
 const { createConsent } = require('./consent');
+const { createAnalytics, requestContext, recordRequest, context } = require('./analytics');
+const { registerAdmin } = require('./admin');
 
 function createApp(config, dependencies) {
   const services = dependencies || { ...createAuth(config), ...createTranslator(config) };
   const app = express();
+  const analytics = dependencies?.analytics || createAnalytics(config.analyticsDatabaseUrl);
+  app.locals.analytics = analytics;
   const consent = createConsent(config);
   app.disable('x-powered-by');
+  app.get('/admin/config', (_req, res) => res.set('Cache-Control', 'no-store').json({
+    configured: !!(config.adminClientId && config.resource), clientId: config.adminClientId || '',
+    authority: `${config.authority}/${config.adminTenant || 'organizations'}`,
+    // A shared SPA/API registration uses its GUID for self-resource tokens.
+    scope: config.resource ? `${config.adminClientId === config.clientId ? config.clientId : config.resource.replace(/\/$/, '')}/access_as_user` : '',
+    redirectUri: `${config.origin}/admin/usage`,
+  }));
+  app.get(['/admin/usage', '/admin/api'], (req, res, next) => {
+    res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    req.url = '/admin.html'; next();
+  });
   app.use('/auth/consent', (_req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }); next();
   }, rateLimit({ windowMs: 60000, limit: 60 }));
@@ -23,7 +38,8 @@ function createApp(config, dependencies) {
     if (req.get('Origin') && req.get('Origin') !== config.origin) return res.status(403).json({ error: '请求来源不被允许。' });
     next();
   });
-  app.use('/api', rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false,
+  app.use('/api/admin', rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }));
+  app.use('/api', rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, skip: req => /^\/admin(?:\/|$)/.test(req.path),
     message: { error: '请求过于频繁，请稍后重试。' } }));
   app.get('/health', (_req, res) => res.json({ ok: true }));
   app.use('/api', async (req, res, next) => {
@@ -33,9 +49,23 @@ function createApp(config, dependencies) {
     catch (error) { res.status(error.status || 401).json({ error: error.status ? error.message : 'SSO 认证失败，请重新登录。' }); }
   });
   app.use('/api', express.json({ limit: '6mb' }));
+  registerAdmin(app, config, analytics, services);
   const route = fn => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };
   app.post('/api/consent/start', route(async (req, res) => res.json(await consent.start(req.identity))));
-  app.get('/api/me', route(async (req, res) => res.json(await services.profile(req.token, req.identity))));
+  app.get('/api/me', route(async (req, res) => {
+    const profile = await services.profile(req.token, req.identity);
+    try { analytics.profile({ tenantId: req.identity.tid.toLowerCase(), userOid: req.identity.oid.toLowerCase(),
+      displayName: typeof profile.displayName === 'string' ? profile.displayName.slice(0, 256) : null,
+      mail: typeof profile.mail === 'string' ? profile.mail.slice(0, 320) : null }); } catch { /* Statistics are optional to login. */ }
+    res.json(profile);
+  }));
+  async function business(req, endpoint, run) {
+    return context.run(requestContext(req.identity, req.body, analytics), async () => {
+      const started = Date.now(); let success = false;
+      try { const result = await run(); success = true; return result; }
+      finally { recordRequest('business', endpoint, started, success); }
+    });
+  }
   function validateHtml(req, res) {
     if (typeof req.body?.html !== 'string' || !req.body.html || req.body.html.length > 1000000) {
       res.status(400).json({ error: '翻译内容为空或超过 1,000,000 字符限制。' }); return false;
@@ -47,7 +77,7 @@ function createApp(config, dependencies) {
     if (typeof req.body.to !== 'string' || !/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(req.body.to)) {
       return res.status(400).json({ error: '目标语言无效。' });
     }
-    res.json({ html: await services.translate(req.body.html, req.body.to) });
+    res.json({ html: await business(req, 'translate', () => services.translate(req.body.html, req.body.to)) });
   }));
   app.post('/api/translate/word', route(async (req, res) => {
     const { paragraphs, to } = req.body || {};
@@ -57,10 +87,10 @@ function createApp(config, dependencies) {
       || typeof to !== 'string' || !/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(to)) {
       return res.status(400).json({ error: '正文段落或目标语言无效，或内容超过限制。' });
     }
-    res.json({ paragraphs: await services.translateWord(paragraphs, to) });
+    res.json({ paragraphs: await business(req, 'translate-word', () => services.translateWord(paragraphs, to)) });
   }));
   app.post('/api/detect', route(async (req, res) => {
-    if (validateHtml(req, res)) res.json(await services.detect(req.body.html));
+    if (validateHtml(req, res)) res.json(await business(req, 'detect', () => services.detect(req.body.html)));
   }));
   app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在。' }));
   app.use((error, _req, res, _next) => {

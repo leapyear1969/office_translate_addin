@@ -4,7 +4,21 @@ beforeEach(() => {
   jest.resetModules();
   (global as any).OfficeRuntime = { auth: { getAccessToken: jest.fn().mockResolvedValue('sso-token') } };
 });
-afterEach(() => { global.fetch = originalFetch; delete (global as any).OfficeRuntime; });
+afterEach(() => { global.fetch = originalFetch; delete (global as any).OfficeRuntime; delete (global as any).Office; });
+
+test.each([
+  ['Word', 'OfficeOnline', 'word', 'online'], ['Outlook', 'PC', 'outlook', 'local'],
+  ['Word', 'Mac', 'word', 'local'], ['Outlook', 'iOS', 'outlook', 'unknown'],
+  [undefined, undefined, 'unknown', 'unknown'],
+])('adds platform dimensions without changing translation payload (%s/%s)', async (host, platform, expectedHost, expectedType) => {
+  (global as any).Office = { context: { host, platform }, HostType: { Word: 'Word', Outlook: 'Outlook' }, PlatformType: { OfficeOnline: 'OfficeOnline', PC: 'PC', Mac: 'Mac' } };
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ html: 'translated' }) });
+  const { api } = await import('./api');
+  const body = { html: 'text', to: 'en' };
+  await api('/api/translate', 'token', body);
+  expect(JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body)).toEqual({ ...body, host: expectedHost, client_type: expectedType });
+  expect(body).toEqual({ html: 'text', to: 'en' });
+});
 
 test.each([13004, '13004'])('reports SSO resource configuration error %s before calling the backend', async code => {
   (global as any).OfficeRuntime.auth.getAccessToken.mockRejectedValue({ code });

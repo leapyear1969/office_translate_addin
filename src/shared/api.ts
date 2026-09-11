@@ -54,6 +54,15 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 110000);
   try {
+    if (['/api/detect', '/api/translate', '/api/translate/word'].includes(path) && body && typeof body === 'object') {
+      const host = typeof Office !== 'undefined' ? Office.context?.host : undefined;
+      const platform = typeof Office !== 'undefined' ? Office.context?.platform : undefined;
+      const hosts = typeof Office !== 'undefined' ? Office.HostType : undefined;
+      const platforms = typeof Office !== 'undefined' ? Office.PlatformType : undefined;
+      body = { ...body, host: host && host === hosts?.Word ? 'word' : host && host === hosts?.Outlook ? 'outlook' : 'unknown',
+        client_type: platform && platform === platforms?.OfficeOnline ? 'online'
+          : platform && (platform === platforms?.PC || platform === platforms?.Mac) ? 'local' : 'unknown' };
+    }
     const response = await fetch(path, { method: body === undefined ? 'GET' : 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,

@@ -1,10 +1,11 @@
-import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
+import type { PublicClientApplication } from '@azure/msal-browser';
 
 type Row = Record<string, any>;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => el<HTMLInputElement>(id);
 const isApi = location.pathname === '/admin/api';
 let msal: PublicClientApplication;
+let InteractionRequiredAuthError: typeof import('@azure/msal-browser').InteractionRequiredAuthError;
 let scope = '';
 let page = 1;
 let generation = 0;
@@ -121,6 +122,8 @@ async function main() {
   const config = await fetch('/admin/config', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('无法读取管理站配置。'); return r.json(); });
   if (!config.configured) { status('管理站尚未配置浏览器登录。请由维护人员完成 ADMIN_CLIENT_ID 与 API 权限配置。'); el<HTMLButtonElement>('login').disabled = true; return; }
   scope = config.scope;
+  const { PublicClientApplication, InteractionRequiredAuthError: AuthError } = await import(/* webpackChunkName: "admin-auth" */ '@azure/msal-browser');
+  InteractionRequiredAuthError = AuthError;
   msal = new PublicClientApplication({ auth: { clientId: config.clientId, authority: config.authority, redirectUri: config.redirectUri, navigateToLoginRequestUrl: false }, cache: { cacheLocation: 'sessionStorage' }, system: { loggerOptions: { loggerCallback: () => {}, piiLoggingEnabled: false } } });
   await msal.initialize();
   const result = await msal.handleRedirectPromise();

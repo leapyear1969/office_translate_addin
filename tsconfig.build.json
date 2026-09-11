@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "module": "ESNext",
     "types": ["office-js-preview", "node"]
   },
   "exclude": [

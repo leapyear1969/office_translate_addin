@@ -20,6 +20,19 @@ module.exports = async (env = {}, argv) => {
       "word/taskpane": "./src/word/taskpane.ts",
     },
     devtool: isDevelopment ? "source-map" : false,
+    optimization: {
+      splitChunks: {
+        cacheGroups: {
+          adminAuth: {
+            test: /[\\/]node_modules[\\/]@azure[\\/]msal-(browser|common)[\\/]/,
+            chunks: "async",
+            // Split the authentication SDK into cacheable, bounded chunks.
+            maxSize: 512 * 1024,
+            priority: 10,
+          },
+        },
+      },
+    },
     resolve: {
       extensions: [".ts", ".js"],
     },

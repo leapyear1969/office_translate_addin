@@ -19,6 +19,8 @@
       <div id="report" hidden>
         <section id="cards" class="cards" aria-label="指标概览"></section>
         <section class="panel"><div class="panel-title"><h2>每日趋势</h2><span id="trend-note"></span></div><div id="trend" class="trend"></div></section>
+        <section id="top-users-panel" class="panel" hidden><h2>用户文本提交量 TOP10</h2><p class="muted">按当前筛选范围内的提交文本量降序排列，同一账号跨平台、客户端合并。文本量按 UTF-16 代码单元累计（如 A😀 计 3），请求数为上游实际尝试数，包含检测、分批、修复 / 重试与失败尝试；不是去重原文或计费字符数。</p><div id="top-users" class="table-wrap"></div></section>
+        <section id="top-tenants-panel" class="panel" hidden><h2>租户文本提交量 TOP10</h2><p class="muted">汇总当前筛选范围内各租户的上游提交文本量和请求数，按文本量降序排列。用户搜索也会缩小租户榜统计范围；平台、客户端分别去重展示。</p><div id="top-tenants" class="table-wrap"></div></section>
         <section id="interfaces-panel" class="panel" hidden><h2>接口用量</h2><div id="interfaces" class="table-wrap"></div></section>
         <section class="panel"><h2>平台与客户端分布</h2><p class="muted" id="platform-note"></p><div id="platforms" class="table-wrap"></div></section>
         <section class="panel"><div class="panel-title"><h2>用户列表</h2><span id="user-count"></span></div><div id="users" class="table-wrap"></div><div class="pagination"><button id="previous" type="button">上一页</button><span id="page"></span><button id="next" type="button">下一页</button></div></section>

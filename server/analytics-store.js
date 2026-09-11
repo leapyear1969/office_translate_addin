@@ -84,7 +84,13 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
         users: await rows(`SELECT a.tenant_id,a.user_oid,u.display_name,u.mail,u.first_used_at,u.last_used_at,
           COUNT(DISTINCT a.date) days,SUM(a.requests) requests,STRING_AGG(DISTINCT a.host || ' / ' || a.client_type,', ') platforms`,
         `GROUP BY a.tenant_id,a.user_oid,u.display_name,u.mail,u.first_used_at,u.last_used_at ORDER BY requests DESC,a.tenant_id,a.user_oid ${limit}`,page) };
+      const ranking = `SUM(a.submitted_units) submitted_units,SUM(a.requests) requests,
+        ARRAY_AGG(DISTINCT a.host ORDER BY a.host) hosts,ARRAY_AGG(DISTINCT a.client_type ORDER BY a.client_type) client_types`;
       return { ...common, totals:await rows(`SELECT a.layer,${totals}`,'GROUP BY a.layer'),
+        topUsers:await rows(`SELECT a.tenant_id,a.user_oid,u.display_name,u.mail,${ranking}`,
+          `AND a.layer='upstream' GROUP BY a.tenant_id,a.user_oid,u.display_name,u.mail ORDER BY submitted_units DESC,requests DESC,a.tenant_id,a.user_oid LIMIT 10`),
+        topTenants:await rows(`SELECT a.tenant_id,${ranking}`,
+          `AND a.layer='upstream' GROUP BY a.tenant_id ORDER BY submitted_units DESC,requests DESC,a.tenant_id LIMIT 10`),
         interfaces:await rows(`SELECT a.layer,a.endpoint,${totals}`,'GROUP BY a.layer,a.endpoint ORDER BY a.layer,a.endpoint'),
         daily:await rows(`SELECT a.date,a.layer,${totals}`,'GROUP BY a.date,a.layer ORDER BY a.date,a.layer'),
         platforms:await rows(`SELECT a.host,a.client_type,a.layer,${totals}`,'GROUP BY a.host,a.client_type,a.layer ORDER BY a.host,a.client_type,a.layer'),

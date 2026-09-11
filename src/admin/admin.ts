@@ -13,7 +13,7 @@ let currentParams = new URLSearchParams();
 const fmt = (value: unknown) => Number(value || 0).toLocaleString('zh-CN');
 const time = (value: unknown) => value ? new Date(Number(value)).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未获取';
 const date = (value: number) => new Date(value + 8 * 3600000).toISOString().slice(0, 10);
-const label = (value: unknown) => ({ word: 'Word', outlook: 'Outlook', online: 'online · 网页', local: 'local · 桌面', unknown: '未识别', business: '后端业务', upstream: '上游服务' }[String(value)] || String(value || '未获取'));
+const label = (value: unknown) => ({ word: 'Word', outlook: 'Outlook', online: 'Web页面', local: '桌面客户端', unknown: '未识别', business: '后端业务', upstream: '上游服务' }[String(value)] || String(value || '未获取'));
 function status(message = '', error = false) { el('status').textContent = message; el('status').className = error ? 'error' : ''; }
 function table(target: string, headers: string[], rows: (string | number)[][]) {
   const container = el(target); container.replaceChildren();

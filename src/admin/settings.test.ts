@@ -1,0 +1,30 @@
+/** @jest-environment jsdom */
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { initSettings } from './settings';
+const tid='11111111-1111-1111-1111-111111111111',oid='22222222-2222-2222-2222-222222222222';
+const owner={tenant_id:tid,user_oid:oid,tenants:['*'],can_manage_admins:true};
+const initial={revision:1,entries:[owner],selfKeys:[`${tid}:oid:${oid}`]};
+const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
+beforeEach(()=>{document.documentElement.innerHTML=readFileSync(join(__dirname,'admin.html'),'utf8');});
+test('adds, edits and removes administrators through forms and preserves drafts after conflict',async()=>{
+  const request=jest.fn(async(_path:string,body?:any)=>body?{...body,revision:body.revision+1,selfKeys:initial.selfKeys}:initial);
+  const status=jest.fn();await initSettings(request,status);
+  expect((document.querySelector('.remove-admin') as HTMLButtonElement).disabled).toBe(true);
+  document.getElementById('add-admin')!.click();
+  const row=document.querySelectorAll('.admin-entry')[1];
+  const control=(name:string)=>row.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
+  control('tenant_id').value=tid;control('identity').value='reader@example.invalid';control('tenants').value=tid;
+  const submit=async()=>{document.getElementById('admin-settings-form')!.dispatchEvent(new Event('submit',{cancelable:true}));await settle();};
+  await submit();
+  expect(request.mock.calls.at(-1)![1].entries[1]).toEqual({tenant_id:tid,email:'reader@example.invalid',tenants:[tid],can_manage_admins:false});
+  expect(status).toHaveBeenLastCalledWith('管理员配置已保存，权限立即生效。');
+  const scope=document.querySelectorAll<HTMLSelectElement>('[name="scope"]')[1];scope.value='all';scope.dispatchEvent(new Event('change',{bubbles:true}));
+  request.mockRejectedValueOnce(new Error('配置已被其他管理员更新'));
+  await submit();expect(document.querySelectorAll('.admin-entry')).toHaveLength(2);
+  expect(status).toHaveBeenLastCalledWith('配置已被其他管理员更新',true);
+  expect((document.getElementById('settings-fields') as HTMLFieldSetElement).disabled).toBe(false);
+  await submit();expect(request.mock.calls.at(-1)![1].entries[1].tenants).toEqual(['*']);
+  document.querySelectorAll<HTMLButtonElement>('.remove-admin')[1].click();await submit();
+  expect(request.mock.calls.at(-1)![1].entries).toHaveLength(1);
+});

@@ -21,13 +21,16 @@ function createAnalytics(connectionString, factory = openStore) {
         if (method === 'record') return await store.record(value);
         if (method === 'profile') return await store.profile(value);
         if (method === 'cleanup') return await store.cleanup(Date.now());
+        if (method === 'adminSettings') return await store.adminSettings(value);
+        if (method === 'saveAdminSettings') return await store.saveAdminSettings(value);
         return await store.meta();
-      } catch {
+      } catch (error) {
+        if (error.status === 409) throw error;
         retryAt = Date.now()+5000;
         await store?.close().catch(() => {}); store = undefined;
         throw unavailable();
       }
-    }).catch(error => { gap(); throw error; }).finally(() => { queued--; if (method === 'query') queries--; });
+    }).catch(error => { if (error.status !== 409) gap(); throw error; }).finally(() => { queued--; if (method === 'query') queries--; });
     tail = work.catch(() => {});
     if (method !== 'query') return work;
     return new Promise((resolve,reject) => {
@@ -40,6 +43,7 @@ function createAnalytics(connectionString, factory = openStore) {
   const cleanup = setInterval(() => ignore(send('cleanup')),86400000); cleanup.unref();
   return { record:value => ignore(send('record',value)),profile:value => ignore(send('profile',value)),
     query:(filters,mode) => send('query',{filters,mode}),flush:() => send('ready'),
+    adminSettings:seed => send('adminSettings',seed),saveAdminSettings:value => send('saveAdminSettings',value),
     close:async () => { stopped=true; clearInterval(cleanup); await tail; await store?.close(); store=undefined; } };
 }
 function requestContext(identity,body,analytics) {

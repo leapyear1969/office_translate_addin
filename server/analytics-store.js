@@ -27,6 +27,7 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
     await transaction(async () => {
       await q('CREATE SCHEMA IF NOT EXISTS usage_analytics');
       await q('CREATE TABLE IF NOT EXISTS usage_analytics.meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      await q('CREATE TABLE IF NOT EXISTS usage_analytics.admin_settings (id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL, entries JSONB NOT NULL)');
       const version = (await meta()).schema_version;
       if (version && version !== '1') throw new Error('Unsupported statistics schema');
       await q(`CREATE TABLE IF NOT EXISTS usage_analytics.users (
@@ -101,6 +102,16 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
     },true);
   }
   return { record,query,meta,
+    adminSettings: seed => transaction(async () => {
+      // An empty installation remains uninitialized so an operator can bootstrap it later.
+      if (seed.length) await q('INSERT INTO usage_analytics.admin_settings VALUES (1,1,$1::jsonb) ON CONFLICT DO NOTHING', [JSON.stringify(seed)]);
+      return (await q('SELECT revision,entries FROM usage_analytics.admin_settings WHERE id=1')).rows[0] || {revision:0,entries:[]};
+    }),
+    saveAdminSettings: value => transaction(async () => {
+      const result = await q('UPDATE usage_analytics.admin_settings SET entries=$1::jsonb,revision=revision+1 WHERE id=1 AND revision=$2 RETURNING revision,entries', [JSON.stringify(value.entries),value.revision]);
+      if (!result.rows.length) throw Object.assign(new Error('配置已被其他管理员更新，请重新加载后再修改。'), {status:409});
+      return result.rows[0];
+    }),
     gap: time => q("INSERT INTO usage_analytics.meta VALUES ('last_gap_at',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",[String(time)]),
     profile: p => transaction(async () => { await ensureUser(p.tenantId,p.userOid); await q('UPDATE usage_analytics.users SET display_name=$1,mail=$2 WHERE tenant_id=$3 AND user_oid=$4',[p.displayName,p.mail,p.tenantId,p.userOid]); }),
     cleanup: time => q('DELETE FROM usage_analytics.api_usage_daily WHERE date < $1',[cutoff(time)]),

@@ -114,13 +114,20 @@ test('API rankings display text totals, upstream requests and all platforms safe
   expect(cells('#top-users thead th')).toEqual(['排名', '姓名', '邮箱', '租户 / 账号', '提交文本量（UTF-16）', '上游请求数', '平台', '客户端']);
   expect(cells('#top-users tbody tr:first-child td')).toEqual(['1', '<img src=x onerror=alert(1)>', 'person@example.invalid', 't / u', '12,345', '7', 'Outlook、Word', '桌面客户端、Web页面']);
   expect(cells('#top-users tbody tr:nth-child(2) td')).toEqual(['2', '未获取', '未获取', 't / unknown-user', '20', '1', '未识别', '未识别']);
-  expect(cells('#top-tenants thead th')).toEqual(['排名', '租户 ID', '提交文本量（UTF-16）', '上游请求数', '平台', '客户端']);
-  expect(cells('#top-tenants tbody td')).toEqual(['1', 't', '12,365', '8', 'Outlook、未识别、Word', '桌面客户端、Web页面、未识别']);
+  expect(cells('#top-tenants thead th')).toEqual(['排名', '租户 ID', '组织名称', '提交文本量（UTF-16）', '上游请求数', '平台', '客户端']);
+  expect(cells('#top-tenants tbody td')).toEqual(['1', 't', '未获取', '12,365', '8', 'Outlook、未识别、Word', '桌面客户端、Web页面、未识别']);
   expect(document.querySelector('#top-users img')).toBeNull();
   expect(document.querySelectorAll('#top-users tbody tr:first-child .numeric.centered')).toHaveLength(3);
   expect(document.querySelectorAll('#top-tenants tbody .numeric.centered')).toHaveLength(3);
   expect(document.getElementById('top-tenants-panel')!.textContent).toContain('用户搜索');
 });
+test('tenant organization names are displayed as plain text after the tenant ID', async () => {
+  apiPage({ ...apiPayload, topTenants: [{ ...apiPayload.topTenants[0], organization_name: '<img src=x onerror=alert(1)>' }] });
+  await import('./admin'); await settle();
+  expect(document.querySelector('#top-tenants tbody td:nth-child(3)')!.textContent).toBe('<img src=x onerror=alert(1)>');
+  expect(document.querySelector('#top-tenants img')).toBeNull();
+});
+
 test('API rankings share report filters and remain present when the user list is paged', async () => {
   apiPage(); await import('./admin'); await settle();
   const original = document.getElementById('top-users')!.textContent;

@@ -56,6 +56,7 @@ function createApp(config, dependencies) {
     const profile = await services.profile(req.token, req.identity);
     try { analytics.profile({ tenantId: req.identity.tid.toLowerCase(), userOid: req.identity.oid.toLowerCase(),
       displayName: typeof profile.displayName === 'string' ? profile.displayName.slice(0, 256) : null,
+      organizationName: typeof profile.organizationName === 'string' ? profile.organizationName.slice(0, 256) : null,
       mail: typeof profile.mail === 'string' ? profile.mail.slice(0, 320) : null }); } catch { /* Statistics are optional to login. */ }
     res.json(profile);
   }));

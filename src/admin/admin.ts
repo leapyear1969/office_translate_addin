@@ -87,7 +87,7 @@ function render(data: Row) {
     cards([['后端业务请求', find('business'), '检测与翻译，含自动预检'], ['上游实际请求', find('upstream'), '每次真实尝试，含分批与修复']]);
     const labels = (values: string[] = []) => values.map(label).join('、') || '未获取';
     table('top-users', ['排名', '姓名', '邮箱', '租户 / 账号', '提交文本量（UTF-16）', '上游请求数', '平台', '客户端'], (data.topUsers || []).map((r: Row, i: number) => [i + 1, r.display_name || '未获取', r.mail || '未获取', `${r.tenant_id} / ${r.user_oid}`, r.submitted_units, r.requests, labels(r.hosts), labels(r.client_types)]), [0, 4, 5]);
-    table('top-tenants', ['排名', '租户 ID', '提交文本量（UTF-16）', '上游请求数', '平台', '客户端'], (data.topTenants || []).map((r: Row, i: number) => [i + 1, r.tenant_id, r.submitted_units, r.requests, labels(r.hosts), labels(r.client_types)]), [0, 2, 3]);
+    table('top-tenants', ['排名', '租户 ID', '组织名称', '提交文本量（UTF-16）', '上游请求数', '平台', '客户端'], (data.topTenants || []).map((r: Row, i: number) => [i + 1, r.tenant_id, r.organization_name || '未获取', r.submitted_units, r.requests, labels(r.hosts), labels(r.client_types)]), [0, 3, 4]);
     table('interfaces', ['层级', '接口', '请求数', '成功', '失败', '提交文本量（UTF-16）'], data.interfaces.map((r: Row) => [label(r.layer), r.endpoint, r.requests, r.successes, r.failures, r.layer === 'upstream' ? r.submitted_units : '不重复计量']), [2, 3, 4, 5]);
     table('platforms', ['平台', '客户端', '层级', '请求数'], data.platforms.map((r: Row) => [label(r.host), label(r.client_type), label(r.layer), r.requests]), [3]);
     table('users', ['姓名', '邮箱', '租户 / 账号', '后端请求', '上游请求'], data.users.map((r: Row) => [r.display_name || '未获取', r.mail || '未获取', `${r.tenant_id} / ${r.user_oid}`, r.business, r.upstream]), [3, 4]);

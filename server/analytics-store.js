@@ -27,6 +27,7 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
     if (!(await q('SELECT pg_try_advisory_lock(731204, 2) AS owned')).rows[0].owned) throw new Error('Another statistics process owns this database');
     await transaction(async () => {
       await q('CREATE SCHEMA IF NOT EXISTS usage_analytics');
+      await q('CREATE TABLE IF NOT EXISTS usage_analytics.tenants (tenant_id TEXT PRIMARY KEY, organization_name TEXT NOT NULL)');
       await q('CREATE TABLE IF NOT EXISTS usage_analytics.meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
       await q('CREATE TABLE IF NOT EXISTS usage_analytics.admin_settings (id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL, entries JSONB NOT NULL)');
       const version = (await meta()).schema_version;
@@ -91,7 +92,7 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
       return { ...common, totals:await rows(`SELECT a.layer,${totals}`,'GROUP BY a.layer'),
         topUsers:await rows(`SELECT a.tenant_id,a.user_oid,u.display_name,u.mail,${ranking}`,
           `AND a.layer='upstream' GROUP BY a.tenant_id,a.user_oid,u.display_name,u.mail ORDER BY submitted_units DESC,requests DESC,a.tenant_id,a.user_oid LIMIT 10`),
-        topTenants:await rows(`SELECT a.tenant_id,${ranking}`,
+        topTenants:await rows(`SELECT a.tenant_id,(SELECT t.organization_name FROM usage_analytics.tenants t WHERE t.tenant_id=a.tenant_id) organization_name,${ranking}`,
           `AND a.layer='upstream' GROUP BY a.tenant_id ORDER BY submitted_units DESC,requests DESC,a.tenant_id LIMIT 10`),
         interfaces:await rows(`SELECT a.layer,a.endpoint,${totals}`,'GROUP BY a.layer,a.endpoint ORDER BY a.layer,a.endpoint'),
         daily:await rows(`SELECT a.date,a.layer,${totals}`,'GROUP BY a.date,a.layer ORDER BY a.date,a.layer'),
@@ -114,7 +115,12 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
       return result.rows[0];
     }),
     gap: time => q("INSERT INTO usage_analytics.meta VALUES ('last_gap_at',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",[String(time)]),
-    profile: p => transaction(async () => { await ensureUser(p.tenantId,p.userOid); await q('UPDATE usage_analytics.users SET display_name=$1,mail=$2 WHERE tenant_id=$3 AND user_oid=$4',[p.displayName,p.mail,p.tenantId,p.userOid]); }),
+    profile: p => transaction(async () => {
+      await ensureUser(p.tenantId,p.userOid);
+      await q('UPDATE usage_analytics.users SET display_name=$1,mail=$2 WHERE tenant_id=$3 AND user_oid=$4',[p.displayName,p.mail,p.tenantId,p.userOid]);
+      if (typeof p.organizationName === 'string' && p.organizationName.trim()) await q(`INSERT INTO usage_analytics.tenants VALUES ($1,$2)
+        ON CONFLICT(tenant_id) DO UPDATE SET organization_name=EXCLUDED.organization_name`, [p.tenantId,p.organizationName.trim().slice(0,256)]);
+    }),
     cleanup: time => q('DELETE FROM usage_analytics.api_usage_daily WHERE date < $1',[cutoff(time, retentionMonths)]),
     deleteUser: (tenant,oid) => transaction(async () => {
       const usage = await q('DELETE FROM usage_analytics.api_usage_daily WHERE tenant_id=$1 AND user_oid=$2',[tenant,oid]);

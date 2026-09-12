@@ -146,6 +146,10 @@ async function main() {
     const { initSettings } = await import('./settings');
     await initSettings(get, status); return;
   }
+  if (access.retained_from) {
+    input('from').min = input('to').min = access.retained_from;
+    if (input('from').value < access.retained_from) input('from').value = access.retained_from;
+  }
   if (access.tenants.includes('*')) {
     const tenant = document.createElement('input'); tenant.id = 'tenant'; tenant.placeholder = '所有租户（可输入租户 ID 筛选）';
     tenant.setAttribute('aria-label', '租户 ID，留空查询所有租户'); el('tenant').replaceWith(tenant);

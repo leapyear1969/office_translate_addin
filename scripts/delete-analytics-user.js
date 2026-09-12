@@ -8,7 +8,7 @@ async function main(){
   const [tenantId,userOid]=args;
   parseAdmins(JSON.stringify([{tenant_id:tenantId,user_oid:userOid,tenants:[tenantId]}]));
   const config=readConfig();if(!config.analyticsDatabaseUrl)throw new Error('No connection');
-  const store=await openStore(config.analyticsDatabaseUrl);
+  const store=await openStore(config.analyticsDatabaseUrl,undefined,undefined,config.analyticsRetentionMonths);
   try{const result=await store.deleteUser(tenantId.toLowerCase(),userOid.toLowerCase());console.log(`Deleted ${result.users} user row and ${result.usageRows} daily rows. Future requests will be collected after restart.`);}
   finally{await store.close();}
 }

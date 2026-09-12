@@ -36,6 +36,15 @@ function apiPage(report: unknown = apiPayload) {
     ? { configured: true, scope: 's' } : url === '/api/admin/session' ? { tenants: ['t'] } : report }));
 }
 const settle = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+test('initial report clamps its date range to the retention boundary from the server', async () => {
+  (global.fetch as jest.Mock).mockImplementation(async (url: string) => ({ok:true,json:async()=>url === '/admin/config'
+    ? {configured:true,scope:'s'} : url === '/api/admin/session' ? {tenants:['t'],retained_from:today} : payload}));
+  await import('./admin'); await settle();
+  expect((document.getElementById('from') as HTMLInputElement).value).toBe(today);
+  expect((document.getElementById('from') as HTMLInputElement).min).toBe(today);
+  const request = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url).startsWith('/api/admin/overview?'));
+  expect(new URL(request![0], 'http://localhost').searchParams.get('from')).toBe(today);
+});
 beforeEach(() => {
   jest.resetModules(); mockSignedIn = true; history.replaceState(null, '', '/admin/usage');
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'admin.html'), 'utf8');

@@ -12,6 +12,22 @@ beforeEach(async()=>{
   },end:()=>engine.close()});
 });
 afterEach(async()=>{await store?.close();});
+test('custom retention controls writes, coverage and cleanup while retaining the boundary day',async()=>{
+  const custom=await openStore('test',now,{connect:async()=>{},query:(sql,args)=>engine.query(sql,args),end:async()=>{}},2);
+  const boundary=cutoff(now,2);
+  const boundaryTime=Date.parse(`${boundary}T12:00:00+08:00`);
+  await custom.record({...base,startedAt:boundaryTime});
+  await custom.record({...base,startedAt:boundaryTime-86400000});
+  let result=await custom.query({...filter,from:'2000-01-01'},'usage');
+  expect(result.coverage.retained_from).toBe(boundary);
+  expect(result.summary.requests).toBe(1);
+  // The original store can write older data, simulating a shortened retention setting.
+  await store.record({...base,startedAt:boundaryTime-86400000});
+  await custom.cleanup(now);
+  result=await custom.query({...filter,from:'2000-01-01'},'usage');
+  expect(result.summary.requests).toBe(1);
+  expect(result.daily[0].date).toBe(boundary);
+});
 test('deduplicates users and days across platforms; detect-only accounts do not become active',async()=>{
   await store.record(base);await store.record({...base,host:'outlook',clientType:'local',success:false});
   await store.record({...base,userOid:'detect-only',endpoint:'detect'});await store.record({...base,tenantId:'tenant-b'});

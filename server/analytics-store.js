@@ -1,15 +1,16 @@
 const { Client } = require('pg');
+const { DEFAULT_RETENTION_MONTHS } = require('./analytics-retention');
 const day = time => new Date(time + 8 * 3600000).toISOString().slice(0, 10);
-function cutoff(now = Date.now()) {
+function cutoff(now = Date.now(), retentionMonths = DEFAULT_RETENTION_MONTHS) {
   const date = new Date(`${day(now)}T00:00:00Z`), d = date.getUTCDate();
-  date.setUTCDate(1); date.setUTCMonth(date.getUTCMonth() - 12);
+  date.setUTCDate(1); date.setUTCMonth(date.getUTCMonth() - retentionMonths);
   date.setUTCDate(Math.min(d, new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()));
   return date.toISOString().slice(0, 10);
 }
 
 // One connection is serialized by analytics.js. A session lock prevents a
 // second serving process or offline maintenance from writing concurrently.
-async function openStore(connectionString, now = Date.now(), injectedClient) {
+async function openStore(connectionString, now = Date.now(), injectedClient, retentionMonths = DEFAULT_RETENTION_MONTHS) {
   const client = injectedClient || new Client({ connectionString, connectionTimeoutMillis: 2000,
     statement_timeout: 3000, query_timeout: 4000, idle_in_transaction_session_timeout: 5000, keepAlive: true });
   let broken = false;
@@ -45,7 +46,7 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
   } catch (error) { await client.end().catch(() => {}); throw error; }
   const ensureUser = (tenant, oid) => q('INSERT INTO usage_analytics.users(tenant_id,user_oid) VALUES ($1,$2) ON CONFLICT DO NOTHING', [tenant,oid]);
   async function record(r) {
-    if (day(r.startedAt) < cutoff()) return;
+    if (day(r.startedAt) < cutoff(Date.now(), retentionMonths)) return;
     return transaction(async () => {
       await ensureUser(r.tenantId,r.userOid);
       await q(`INSERT INTO usage_analytics.api_usage_daily VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$9,$10)
@@ -76,7 +77,7 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
       const limit = `LIMIT $${args.length+1} OFFSET $${args.length+2}`, page = [f.pageSize,(f.page-1)*f.pageSize];
       const totals = 'SUM(a.requests) requests,SUM(a.successes) successes,SUM(a.failures) failures,SUM(a.submitted_units) submitted_units';
       const count = Number((await q(`SELECT COUNT(*) n FROM (SELECT a.tenant_id,a.user_oid ${sql} GROUP BY a.tenant_id,a.user_oid) people`,args)).rows[0].n);
-      const coverage = { ...await meta(),retained_from:cutoff(),timezone:'Asia/Shanghai' };
+      const coverage = { ...await meta(),retained_from:cutoff(Date.now(), retentionMonths),timezone:'Asia/Shanghai' };
       const common = { coverage,totalUsers:count,page:f.page,pageSize:f.pageSize };
       if (mode === 'usage') return { ...common,summary:{ ...(await rows('SELECT COALESCE(SUM(a.requests),0) requests'))[0],users:count },
         daily: await rows('SELECT a.date,SUM(a.requests) requests','GROUP BY a.date ORDER BY a.date'),
@@ -114,7 +115,7 @@ async function openStore(connectionString, now = Date.now(), injectedClient) {
     }),
     gap: time => q("INSERT INTO usage_analytics.meta VALUES ('last_gap_at',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",[String(time)]),
     profile: p => transaction(async () => { await ensureUser(p.tenantId,p.userOid); await q('UPDATE usage_analytics.users SET display_name=$1,mail=$2 WHERE tenant_id=$3 AND user_oid=$4',[p.displayName,p.mail,p.tenantId,p.userOid]); }),
-    cleanup: time => q('DELETE FROM usage_analytics.api_usage_daily WHERE date < $1',[cutoff(time)]),
+    cleanup: time => q('DELETE FROM usage_analytics.api_usage_daily WHERE date < $1',[cutoff(time, retentionMonths)]),
     deleteUser: (tenant,oid) => transaction(async () => {
       const usage = await q('DELETE FROM usage_analytics.api_usage_daily WHERE tenant_id=$1 AND user_oid=$2',[tenant,oid]);
       const users = await q('DELETE FROM usage_analytics.users WHERE tenant_id=$1 AND user_oid=$2',[tenant,oid]);

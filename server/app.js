@@ -9,7 +9,7 @@ const { registerAdmin } = require('./admin');
 function createApp(config, dependencies) {
   const services = dependencies || { ...createAuth(config), ...createTranslator(config) };
   const app = express();
-  const analytics = dependencies?.analytics || createAnalytics(config.analyticsDatabaseUrl);
+  const analytics = dependencies?.analytics || createAnalytics(config.analyticsDatabaseUrl, undefined, config.analyticsRetentionMonths);
   app.locals.analytics = analytics;
   const consent = createConsent(config);
   app.disable('x-powered-by');

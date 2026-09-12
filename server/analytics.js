@@ -3,7 +3,7 @@ const { openStore } = require('./analytics-store');
 const context = new AsyncLocalStorage();
 const unavailable = () => new Error('Statistics unavailable');
 
-function createAnalytics(connectionString, factory = openStore) {
+function createAnalytics(connectionString, factory = openStore, retentionMonths) {
   let store, tail = Promise.resolve(), queued = 0, queries = 0, stopped = false, gapAt = 0, lastWarning = 0, retryAt = 0;
   function gap() {
     gapAt = Date.now();
@@ -15,7 +15,7 @@ function createAnalytics(connectionString, factory = openStore) {
     const work = tail.then(async () => {
       if (!connectionString || Date.now() < retryAt) throw unavailable();
       try {
-        store ||= await factory(connectionString);
+        store ||= await factory(connectionString, undefined, undefined, retentionMonths);
         if (gapAt) await store.gap(gapAt);
         if (method === 'query') return { ...await store.query(value.filters,value.mode),health:{lastGapAt:gapAt || null} };
         if (method === 'record') return await store.record(value);

@@ -12,12 +12,14 @@ function parseAdmins(text = '[]') {
 function allowedTenants(identity, admins = []) {
   return [...new Set(admins.filter(e => e.tenant_id === identity.tid.toLowerCase() && e.user_oid === identity.oid.toLowerCase()).flatMap(e => e.tenants))];
 }
-function filters(query, tenants, now = Date.now()) {
+function filters(query, tenants, now = Date.now(), retentionMonths) {
   const string = key => { const value = query[key]; if (value !== undefined && typeof value !== 'string') throw bad('筛选参数格式无效。'); return value || ''; };
   const to = string('to') || day(now);
-  const from = string('from') || day(now - 29 * 86400000);
+  const retainedFrom = cutoff(now, retentionMonths);
+  const defaultFrom = day(now - 29 * 86400000);
+  const from = string('from') || (defaultFrom < retainedFrom ? retainedFrom : defaultFrom);
   const dateValid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
-  if (!dateValid(from) || !dateValid(to) || from > to || from < cutoff(now) || to > day(now)) throw bad('请选择保留期内的日期，截止日期不能晚于今天。');
+  if (!dateValid(from) || !dateValid(to) || from > to || from < retainedFrom || to > day(now)) throw bad('请选择保留期内的日期，截止日期不能晚于今天。');
   const tenant = string('tenant').toLowerCase(), host = string('host'), clientType = string('client_type'), userOid = string('user_oid'), search = string('search').trim();
   if (tenant && !tenants.includes('*') && !tenants.includes(tenant)) throw Object.assign(new Error('无权查询此租户。'), { status: 403 });
   if (tenant && !guid(tenant)) throw bad('租户 ID 格式无效。');
@@ -59,7 +61,7 @@ function registerAdmin(app, config, analytics, services) {
     if (!req.adminTenants.length) return res.status(403).json({ error: '此账号没有统计后台查询权限。' });
     next();
   });
-  app.get('/api/admin/session', (req, res) => res.json({ tenants: req.adminTenants, canManageAdmins:req.canManageAdmins }));
+  app.get('/api/admin/session', (req, res) => res.json({ tenants: req.adminTenants, canManageAdmins:req.canManageAdmins, retained_from:cutoff(Date.now(), config.analyticsRetentionMonths) }));
   app.get('/api/admin/settings', (req,res) => {
     if (!req.canManageAdmins) return res.status(403).json({error:'此账号没有管理员配置权限。'});
     res.json({...req.adminSettings,selfKeys:req.adminKeys});
@@ -82,7 +84,7 @@ function registerAdmin(app, config, analytics, services) {
   });
   for (const [route, mode] of [['overview', 'usage'], ['api-usage', 'api']]) {
     app.get(`/api/admin/${route}`, async (req, res) => {
-      try { res.json(await analytics.query(filters(req.query, req.adminTenants), mode)); }
+      try { res.json(await analytics.query(filters(req.query, req.adminTenants, Date.now(), config.analyticsRetentionMonths), mode)); }
       catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : '统计暂不可用，请稍后重试。翻译功能不受影响。' }); }
     });
   }

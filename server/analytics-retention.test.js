@@ -7,8 +7,19 @@ test('retention environment defaults and invalid values', () => {
   expect(readConfig({}).analyticsRetentionMonths).toBe(12);
   expect(readConfig({ANALYTICS_RETENTION_MONTHS:''}).analyticsRetentionMonths).toBe(12);
   expect(readConfig({ANALYTICS_RETENTION_MONTHS:'24'}).analyticsRetentionMonths).toBe(24);
-  for (const value of ['0', '-1', '1.5', 'abc', 'Infinity', ' ', '1201']) {
+  expect(readConfig({ANALYTICS_RETENTION_MONTHS:'0'}).analyticsRetentionMonths).toBe(0);
+  for (const value of ['-1', '1.5', 'abc', 'Infinity', ' ', '1201']) {
     expect(() => readConfig({ANALYTICS_RETENTION_MONTHS:value})).toThrow('ANALYTICS_RETENTION_MONTHS');
+  }
+});
+
+test('permanent retention removes the historical cutoff but keeps date validation and recent defaults', () => {
+  const now = Date.parse('2025-03-01T03:00:00Z');
+  expect(cutoff(now, 0)).toBeNull();
+  expect(filters({}, ['*'], now, 0).from).toBe('2025-01-31');
+  expect(filters({from:'1900-01-01'}, ['*'], now, 0).from).toBe('1900-01-01');
+  for (const query of [{from:'invalid'}, {from:'2025-02-30'}, {from:'2025-03-01',to:'2025-02-28'}, {to:'2025-03-02'}]) {
+    expect(() => filters(query, ['*'], now, 0)).toThrow('日期');
   }
 });
 

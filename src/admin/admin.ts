@@ -60,7 +60,7 @@ function trend(data: Row, from: string, to: string) {
     else { v[0] = row.requests; v[1] = data.activeDaily[row.date] || 0; }
     values.set(row.date, v);
   }
-  const start = Math.max(Date.parse(from), Date.parse(date(Number(data.coverage.started_at))), Date.parse(data.coverage.retained_from));
+  const start = Math.max(Date.parse(from), Date.parse(date(Number(data.coverage.started_at))), data.coverage.retained_from ? Date.parse(data.coverage.retained_from) : -Infinity);
   for (let d = start; d <= Date.parse(to); d += 86400000) { const key = new Date(d).toISOString().slice(0, 10); if (!values.has(key)) values.set(key, [0, 0]); }
   const max = Math.max(1, ...[...values.values()].map(v => Math.max(...v)));
   if (!values.size) { container.textContent = '该范围尚未开始采集，无可用趋势。'; return; }
@@ -76,7 +76,8 @@ function trend(data: Row, from: string, to: string) {
 function render(data: Row) {
   const coverage = data.coverage;
   const gap = data.health.lastGapAt || coverage.last_gap_at;
-  el('coverage').textContent = `采集起点：${time(coverage.started_at)}。日汇总保留至 ${coverage.retained_from} 起；采集前及已清理的历史不可用。${gap ? ` 已知统计缺口：${time(gap)} 附近存在写入异常，报表可能不完整，空白日期不代表确认未使用。` : '进程中断可能造成未观测请求，统计不是审计账本。'}`;
+  const retention = coverage.retained_from === null ? '日汇总永久保留' : `日汇总保留至 ${coverage.retained_from} 起`;
+  el('coverage').textContent = `采集起点：${time(coverage.started_at)}。${retention}；采集前及已清理的历史不可用。${gap ? ` 已知统计缺口：${time(gap)} 附近存在写入异常，报表可能不完整，空白日期不代表确认未使用。` : '进程中断可能造成未观测请求，统计不是审计账本。'}`;
   if (currentParams.get('to')! < date(Number(coverage.started_at))) {
     el('report').hidden = false;
     el('cards').replaceChildren(); el('trend').textContent = '所选日期早于采集起点，历史数据不可用。';

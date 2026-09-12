@@ -2,6 +2,7 @@ const { Client } = require('pg');
 const { DEFAULT_RETENTION_MONTHS } = require('./analytics-retention');
 const day = time => new Date(time + 8 * 3600000).toISOString().slice(0, 10);
 function cutoff(now = Date.now(), retentionMonths = DEFAULT_RETENTION_MONTHS) {
+  if (retentionMonths === 0) return null;
   const date = new Date(`${day(now)}T00:00:00Z`), d = date.getUTCDate();
   date.setUTCDate(1); date.setUTCMonth(date.getUTCMonth() - retentionMonths);
   date.setUTCDate(Math.min(d, new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()));
@@ -58,7 +59,8 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
   } catch (error) { await client.end().catch(() => {}); throw error; }
   const ensureUser = (tenant, oid) => q('INSERT INTO usage_analytics.users(tenant_id,user_oid) VALUES ($1,$2) ON CONFLICT DO NOTHING', [tenant,oid]);
   async function record(r) {
-    if (day(r.startedAt) < cutoff(Date.now(), retentionMonths)) return;
+    const retainedFrom = cutoff(Date.now(), retentionMonths);
+    if (retainedFrom !== null && day(r.startedAt) < retainedFrom) return;
     return transaction(async () => {
       await ensureUser(r.tenantId,r.userOid);
       await q(`INSERT INTO usage_analytics.api_usage_daily VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$9,$10)
@@ -148,7 +150,11 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
       if (typeof p.organizationName === 'string' && p.organizationName.trim()) await q(`INSERT INTO usage_analytics.tenants VALUES ($1,$2)
         ON CONFLICT(tenant_id) DO UPDATE SET organization_name=EXCLUDED.organization_name`, [p.tenantId,p.organizationName.trim().slice(0,256)]);
     }),
-    cleanup: time => q('DELETE FROM usage_analytics.api_usage_daily WHERE date < $1',[cutoff(time, retentionMonths)]),
+    cleanup: async time => {
+      const retainedFrom = cutoff(time, retentionMonths);
+      if (retainedFrom === null) return;
+      return q('DELETE FROM usage_analytics.api_usage_daily WHERE date < $1',[retainedFrom]);
+    },
     deleteUser: (tenant,oid) => transaction(async () => {
       const usage = await q('DELETE FROM usage_analytics.api_usage_daily WHERE tenant_id=$1 AND user_oid=$2',[tenant,oid]);
       const users = await q('DELETE FROM usage_analytics.users WHERE tenant_id=$1 AND user_oid=$2',[tenant,oid]);

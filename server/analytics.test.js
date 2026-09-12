@@ -12,6 +12,25 @@ beforeEach(async()=>{
   },end:()=>engine.close()});
 });
 afterEach(async()=>{await store?.close();});
+test('permanent retention preserves old writes through cleanup and supports returning to finite retention',async()=>{
+  const query=jest.fn((sql,args)=>engine.query(sql,args));
+  const permanent=await openStore('test',now,{connect:async()=>{},query,end:async()=>{}},0);
+  await permanent.record({...base,startedAt:Date.parse('1900-01-01T12:00:00+08:00')});
+  await permanent.record(base);
+  query.mockClear();
+  await permanent.cleanup(now);
+  await permanent.cleanup(Date.parse('2200-01-01T00:00:00Z'));
+  expect(query).not.toHaveBeenCalled();
+  const historical={...filter,from:'1900-01-01'};
+  const result=await permanent.query(historical,'usage');
+  expect(result.coverage.retained_from).toBeNull();
+  expect(result.summary.requests).toBe(2);
+  expect(result.daily[0].date).toBe('1900-01-01');
+  expect((await permanent.query(historical,'api')).coverage.retained_from).toBeNull();
+  await store.cleanup(now);
+  expect((await store.query(historical,'usage')).summary.requests).toBe(1);
+});
+
 test('custom retention controls writes, coverage and cleanup while retaining the boundary day',async()=>{
   const custom=await openStore('test',now,{connect:async()=>{},query:(sql,args)=>engine.query(sql,args),end:async()=>{}},2);
   const boundary=cutoff(now,2);

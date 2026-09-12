@@ -17,9 +17,9 @@ function filters(query, tenants, now = Date.now(), retentionMonths) {
   const to = string('to') || day(now);
   const retainedFrom = cutoff(now, retentionMonths);
   const defaultFrom = day(now - 29 * 86400000);
-  const from = string('from') || (defaultFrom < retainedFrom ? retainedFrom : defaultFrom);
+  const from = string('from') || (retainedFrom !== null && defaultFrom < retainedFrom ? retainedFrom : defaultFrom);
   const dateValid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
-  if (!dateValid(from) || !dateValid(to) || from > to || from < retainedFrom || to > day(now)) throw bad('请选择保留期内的日期，截止日期不能晚于今天。');
+  if (!dateValid(from) || !dateValid(to) || from > to || (retainedFrom !== null && from < retainedFrom) || to > day(now)) throw bad('请选择保留期内的日期，截止日期不能晚于今天。');
   const tenant = string('tenant').toLowerCase(), host = string('host'), clientType = string('client_type'), userOid = string('user_oid'), search = string('search').trim();
   if (tenant && !tenants.includes('*') && !tenants.includes(tenant)) throw Object.assign(new Error('无权查询此租户。'), { status: 403 });
   if (tenant && !guid(tenant)) throw bad('租户 ID 格式无效。');

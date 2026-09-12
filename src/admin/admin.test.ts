@@ -60,6 +60,22 @@ beforeEach(() => {
 });
 afterEach(() => { global.fetch = originalFetch; });
 
+test('permanent retention has no minimum date and renders zero-usage days without a cutoff', async () => {
+  const report = { ...payload, coverage: { ...payload.coverage, retained_from: null }, daily: [], activeDaily: {} };
+  (global.fetch as jest.Mock).mockImplementation(async (url: string) => ({ok:true,json:async()=>url === '/admin/config'
+    ? {configured:true,scope:'s'} : url === '/api/admin/session' ? {tenants:['t'],retained_from:null} : report}));
+  await import('./admin'); await settle();
+  expect((document.getElementById('from') as HTMLInputElement).min).toBe('');
+  expect((document.getElementById('to') as HTMLInputElement).min).toBe('');
+  expect(document.getElementById('coverage')!.textContent).toContain('日汇总永久保留');
+  expect(document.getElementById('coverage')!.textContent).not.toContain('null');
+  expect(document.querySelectorAll('#trend .trend-row')).toHaveLength(30);
+  (document.getElementById('from') as HTMLInputElement).value = '1900-01-01';
+  document.getElementById('filters')!.dispatchEvent(new Event('submit', {cancelable:true})); await settle();
+  expect((global.fetch as jest.Mock).mock.calls.at(-1)[0]).toContain('from=1900-01-01');
+  expect(document.querySelectorAll('#trend .trend-row')).toHaveLength(31);
+});
+
 test('uses refresh-token renewal without a hidden iframe and allows login after expiry', async () => {
   const { InteractionRequiredAuthError } = await import('@azure/msal-browser');
   mockAcquireTokenSilent.mockRejectedValue(new InteractionRequiredAuthError('login_required'));

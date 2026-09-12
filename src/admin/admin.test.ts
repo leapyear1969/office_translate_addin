@@ -2,14 +2,17 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 let mockSignedIn = true;
+const mockAcquireTokenSilent = jest.fn();
+const mockLoginRedirect = jest.fn();
 jest.mock('@azure/msal-browser', () => ({
   PublicClientApplication: class {
     async initialize() {} async handleRedirectPromise() { return null; }
     getActiveAccount() { return mockSignedIn ? { username: 'admin@example.invalid' } : null; }
     getAllAccounts() { return []; } setActiveAccount() {}
-    async acquireTokenSilent() { return { accessToken: 'test-token' }; }
-    async loginRedirect() {} async logoutRedirect() {}
+    acquireTokenSilent(request: unknown) { return mockAcquireTokenSilent(request); }
+    loginRedirect(request: unknown) { return mockLoginRedirect(request); } async logoutRedirect() {}
   }, InteractionRequiredAuthError: class extends Error {},
+  CacheLookupPolicy: { AccessTokenAndRefreshToken: 2 },
 }));
 const originalFetch = global.fetch;
 const now = Date.now();
@@ -46,6 +49,8 @@ test('initial report clamps its date range to the retention boundary from the se
   expect(new URL(request![0], 'http://localhost').searchParams.get('from')).toBe(today);
 });
 beforeEach(() => {
+  mockAcquireTokenSilent.mockReset().mockResolvedValue({ accessToken: 'test-token' });
+  mockLoginRedirect.mockReset().mockResolvedValue(undefined);
   jest.resetModules(); mockSignedIn = true; history.replaceState(null, '', '/admin/usage');
   document.documentElement.innerHTML = readFileSync(join(__dirname, 'admin.html'), 'utf8');
   (AbortSignal as any).timeout ||= () => new AbortController().signal;
@@ -54,6 +59,17 @@ beforeEach(() => {
     : url === '/api/admin/session' ? { tenants: ['t'] } : payload })) as any;
 });
 afterEach(() => { global.fetch = originalFetch; });
+
+test('uses refresh-token renewal without a hidden iframe and allows login after expiry', async () => {
+  const { InteractionRequiredAuthError } = await import('@azure/msal-browser');
+  mockAcquireTokenSilent.mockRejectedValue(new InteractionRequiredAuthError('login_required'));
+  await import('./admin'); await settle();
+  expect(mockAcquireTokenSilent).toHaveBeenCalledWith(expect.objectContaining({ cacheLookupPolicy: 2 }));
+  expect(document.getElementById('status')!.textContent).toContain('登录已过期');
+  expect((global.fetch as jest.Mock).mock.calls.some(([url]) => String(url).startsWith('/api/admin/'))).toBe(false);
+  document.getElementById('login')!.click(); await settle();
+  expect(mockLoginRedirect).toHaveBeenCalledWith({ scopes: ['api://test/access_as_user'], prompt: 'select_account' });
+});
 
 test('settings URL denies readers and exposes the navigation only to managers', async () => {
   history.replaceState(null, '', '/admin/settings');

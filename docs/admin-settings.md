@@ -45,6 +45,16 @@ ANALYTICS_ADMINS=[{"tenant_id":"<登录租户 GUID>","user_oid":"<已核对的�
 
 应用保持 `trust proxy=false`，不采信客户端自行传入的 X-Forwarded-For。部署时需在可信入口设置连接和请求防滥用限制：带 Bearer 的请求仍需先验证签名才能决定其身份配额，应用的失败计数不能代替入口层的验签资源保护。如需启用代理信任，应根据实际代理地址和链单独配置，不能直接设为 true。配额使用进程内存，重启重置；继续使用单实例部署。
 
+## 后台浏览器策略与依赖补丁
+
+后台 `/admin/*` 与 `/admin.html` 使用 CSP、`X-Frame-Options: DENY` 和 `X-Content-Type-Options: nosniff`。后台只能作为顶层页面打开；Office 的 Word、Outlook taskpane 和其他插件页面不添加禁止嵌入策略。脚本和样式仅从同源加载，禁止内联脚本、eval、对象、表单提交及子框架；API/MSAL 连接允许同源、配置的 AUTHORITY、Microsoft 实例发现端点和适用的中国云登录别名。
+
+登录仍跳转 Entra 并回到已有 `/admin/usage`，无需新增回调地址。访问令牌过期时可使用刷新令牌续期；刷新令牌过期或需重新授权时，页面提示重新登录，由用户点击登录按钮继续，不尝试隐藏 iframe。若改用其他身份云或自定义 authority，应同步核验其发现与令牌端点是否受 CSP 允许。
+
+生产安装须同时更新 `package.json` 和 `package-lock.json`，用 `npm ci`、`npm run build` 构建，再按现有方式重启后端。覆盖 `qs=6.16.0` 修复两项解析/序列化公告；仅在 MSAL Node 下覆盖 `uuid=11.1.1`，保留 CommonJS 的 v4 API，避免本次升级 Express/MSAL 主版本。覆盖超出了上游依赖范围，后续升级需复测，待上游原生依赖已修复版本后删除 overrides。核验命令：`npm audit --omit=dev --registry=https://registry.npmjs.org`。开发工具链公告仍需另行处理，不能把生产审计为零理解为全依赖审计为零。
+
+部署后检查 GET/HEAD `/admin/usage`、`/admin/api`、`/admin/settings`、`/admin.html` 的响应头。若代理直接提供静态文件，必须配置等效后台策略或让这些请求经过 Node，否则会绕开中间件。用真实管理员验证登录、回调、查询、权限保存、令牌续期与退出；检查浏览器无 CSP 拦截所需资源，后台 iframe 嵌入被拒绝，Office 插件仍可加载。本地自动测试不替代真实 Entra/Office 环境验收。
+
 ## 权限变更审计
 
 网页保存权限时，同一事务会追加 `usage_analytics.admin_settings_audit`：已验证操作者的租户/对象 ID、数据库时间、前后版本及发生变化的授权条目。新增、撤销及角色/范围修改均可追溯；无权限、校验失败和版本冲突不会产生成功变更记录。审计插入失败时，权限和版本一并回滚。初始环境导入不是网页修改，不包含伪造的用户操作者；应通过部署记录保留初始化名单来源。

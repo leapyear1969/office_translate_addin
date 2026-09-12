@@ -7,6 +7,7 @@ const isApi = location.pathname === '/admin/api';
 const isSettings = location.pathname === '/admin/settings';
 let msal: PublicClientApplication;
 let InteractionRequiredAuthError: typeof import('@azure/msal-browser').InteractionRequiredAuthError;
+let CacheLookupPolicy: typeof import('@azure/msal-browser').CacheLookupPolicy;
 let scope = '';
 let page = 1;
 let generation = 0;
@@ -36,7 +37,9 @@ function cards(items: [string, number, string][]) {
 async function token() {
   const account = msal.getActiveAccount();
   if (!account) throw new Error('请先使用管理员账号登录。');
-  try { return (await msal.acquireTokenSilent({ scopes: [scope], account })).accessToken; }
+  // The standalone admin page forbids framing, including MSAL's hidden-iframe fallback.
+  // Keep cached tokens and refresh-token renewal; expired sessions use the login button.
+  try { return (await msal.acquireTokenSilent({ scopes: [scope], account, cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken })).accessToken; }
   catch (error) { if (error instanceof InteractionRequiredAuthError) throw new Error('登录已过期或需要授权，请点击“重新登录”。'); throw new Error('无法获取访问权限，请重新登录。'); }
 }
 async function get(path: string, body?: unknown) {
@@ -127,7 +130,8 @@ async function main() {
   const config = await fetch('/admin/config', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('无法读取管理站配置。'); return r.json(); });
   if (!config.configured) { status('管理站尚未配置浏览器登录。请由维护人员完成 ADMIN_CLIENT_ID 与 API 权限配置。'); el<HTMLButtonElement>('login').disabled = true; return; }
   scope = config.scope;
-  const { PublicClientApplication, InteractionRequiredAuthError: AuthError } = await import(/* webpackChunkName: "admin-auth" */ '@azure/msal-browser');
+  const { PublicClientApplication, InteractionRequiredAuthError: AuthError, CacheLookupPolicy: LookupPolicy } = await import(/* webpackChunkName: "admin-auth" */ '@azure/msal-browser');
+  CacheLookupPolicy = LookupPolicy;
   InteractionRequiredAuthError = AuthError;
   msal = new PublicClientApplication({ auth: { clientId: config.clientId, authority: config.authority, redirectUri: config.redirectUri, navigateToLoginRequestUrl: false }, cache: { cacheLocation: 'sessionStorage' }, system: { loggerOptions: { loggerCallback: () => {}, piiLoggingEnabled: false } } });
   await msal.initialize();

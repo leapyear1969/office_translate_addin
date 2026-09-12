@@ -41,6 +41,12 @@
   "engines": {
     "node": ">=20.16"
   },
+  "overrides": {
+    "qs": "6.16.0",
+    "@azure/msal-node": {
+      "uuid": "11.1.1"
+    }
+  },
   "dependencies": {
     "@azure/msal-browser": "^4.29.0",
     "@azure/msal-node": "^3.8.10",

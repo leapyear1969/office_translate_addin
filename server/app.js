@@ -5,6 +5,7 @@ const { createTranslator } = require('./translator');
 const { createConsent } = require('./consent');
 const { createAnalytics, requestContext, recordRequest, context } = require('./analytics');
 const { registerAdmin } = require('./admin');
+const { adminPageSecurity } = require('./admin-security');
 
 function createApp(config, dependencies) {
   const services = dependencies || { ...createAuth(config), ...createTranslator(config) };
@@ -13,6 +14,7 @@ function createApp(config, dependencies) {
   app.locals.analytics = analytics;
   const consent = createConsent(config);
   app.disable('x-powered-by');
+  app.use(adminPageSecurity(config));
   app.get('/admin/config', (_req, res) => res.set('Cache-Control', 'no-store').json({
     configured: !!(config.adminClientId && config.resource), clientId: config.adminClientId || '',
     authority: `${config.authority}/${config.adminTenant || 'organizations'}`,
@@ -21,7 +23,6 @@ function createApp(config, dependencies) {
     redirectUri: `${config.origin}/admin/usage`,
   }));
   app.get(['/admin/usage', '/admin/api', '/admin/settings'], (req, res, next) => {
-    res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     req.url = '/admin.html'; next();
   });
   app.use('/auth/consent', (_req, res, next) => {

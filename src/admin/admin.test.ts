@@ -192,5 +192,5 @@ test('API page separates layers and does not show provider units on business row
   await import('./admin'); await settle();
   expect(document.getElementById('cards')!.textContent).toContain('后端业务请求1');
   expect(document.getElementById('cards')!.textContent).toContain('上游实际请求3');
-  expect(document.getElementById('interfaces')!.textContent).toContain('不重复计量');
+  expect(document.getElementById('interfaces')!.textContent).toContain('仅在上游统计');
 });

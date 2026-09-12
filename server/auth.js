@@ -13,7 +13,27 @@ async function verifyIdentity(token, config, key, issuer) {
 
 function createAuth(config) {
   const metadata = new Map();
+  const organizations = new Map();
   let cca;
+  async function organizationName(accessToken, tid) {
+    const key = tid.toLowerCase();
+    const cached = organizations.get(key);
+    if (cached && cached.expires > Date.now()) return cached.name;
+    let name;
+    try {
+      const response = await fetch(`${config.graphBase}/v1.0/organization?$select=id,displayName`, {
+        headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(3000),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const organization = data.value?.find(o => typeof o.id === 'string' && o.id.toLowerCase() === key);
+        if (typeof organization?.displayName === 'string' && organization.displayName.trim()) name = organization.displayName.trim().slice(0, 256);
+      }
+    } catch { /* Organization lookup is optional to login. */ }
+    if (organizations.size >= 100) organizations.delete(organizations.keys().next().value);
+    organizations.set(key, { name, expires: Date.now() + (name ? 86400000 : 300000) });
+    return name;
+  }
   async function discover(tenantId) {
     if (!config.clientId || !config.resource) {
       throw Object.assign(new Error('请先配置 SSO 的 Client ID 和 Application ID URI。'), { status: 503 });
@@ -71,7 +91,8 @@ function createAuth(config) {
           if (bytes.length <= 100000) photo = `data:image/jpeg;base64,${bytes.toString('base64')}`;
         }
       } catch { /* Use the display-name initial when a photo cannot be loaded. */ }
-      return { ...(photo ? { photo } : {}), id: user.id, displayName: user.displayName || '', mail: user.mail || user.userPrincipalName || '', tenantId: identity.tid };
+      const name = await organizationName(result.accessToken, identity.tid);
+      return { ...(name ? { organizationName: name } : {}), ...(photo ? { photo } : {}), id: user.id, displayName: user.displayName || '', mail: user.mail || user.userPrincipalName || '', tenantId: identity.tid };
     } catch (error) {
       if (error.errorCode === 'consent_required' || error.subError === 'consent_required'
         || /AADSTS65001\b/.test(error.message || '')) {

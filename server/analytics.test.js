@@ -88,14 +88,26 @@ test('API rankings aggregate upstream text by entity across days, endpoints and 
   expect(result.topUsers[0]).toMatchObject({display_name:'A User',mail:'a@example.invalid',hosts:['outlook','word'],client_types:['local','online']});
   expect(result.topUsers[2]).toMatchObject({display_name:null,mail:null,hosts:['unknown'],client_types:['unknown']});
   expect(result.topTenants).toEqual([
-    {tenant_id:'tenant-b',submitted_units:140,requests:2,hosts:['unknown','word'],client_types:['local','unknown']},
-    {tenant_id:'tenant-a',submitted_units:130,requests:3,hosts:['outlook','word'],client_types:['local','online']},
+    {tenant_id:'tenant-b',organization_name:null,submitted_units:140,requests:2,hosts:['unknown','word'],client_types:['local','unknown']},
+    {tenant_id:'tenant-a',organization_name:null,submitted_units:130,requests:3,hosts:['outlook','word'],client_types:['local','online']},
   ]);
   await store.record({...upstream,tenantId:'zero-text',units:0});
   expect((await store.query({...filter,tenants:['zero-text']},'api')).topTenants).toEqual([
     expect.objectContaining({tenant_id:'zero-text',submitted_units:0,requests:1}),
   ]);
 });
+test('tenant names backfill historical rankings and survive missing profile metadata',async()=>{
+  await store.record({...base,layer:'upstream',units:10});
+  await store.record({...base,tenantId:'tenant-b',layer:'upstream',units:20});
+  await store.profile({...base,organizationName:'Company A'});
+  await store.profile({...base,userOid:'another-user'});
+  let result=await store.query({...filter,tenants:['*']},'api');
+  expect(result.topTenants.map(r=>[r.tenant_id,r.organization_name,r.submitted_units])).toEqual([['tenant-b',null,20],['tenant-a','Company A',10]]);
+  await store.profile({...base,organizationName:'Renamed Company'});
+  result=await store.query(filter,'api');
+  expect(result.topTenants[0].organization_name).toBe('Renamed Company');
+});
+
 test('both API rankings use the same tenant grants and filters as the report',async()=>{
   const upstream={...base,layer:'upstream'};
   await store.record({...upstream,units:60});

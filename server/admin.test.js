@@ -63,7 +63,7 @@ test('authenticated tenant-scoped admin routes, counters and profile whitelistin
     expect(analytics.record.mock.calls[0][0]).toMatchObject({ tenantId: tid, userOid: oid, host: 'word', clientType: 'online' });
     expect(JSON.stringify(analytics.record.mock.calls)).not.toContain('secret');
     await request('/api/me');
-    expect(analytics.profile).toHaveBeenCalledWith({ tenantId: tid, userOid: oid, displayName: 'Name', mail: 'mail' });
+    expect(analytics.profile).toHaveBeenCalledWith({ tenantId: tid, userOid: oid, displayName: 'Name', mail: 'mail', organizationName: null });
     expect((await request('/api/admin/delete', 'admin', {})).status).toBe(404);
     analytics.record.mockImplementation(() => { throw new Error('Database locked'); });
     expect((await request('/api/translate', 'admin', { html: 'text', to: 'en' })).status).toBe(200);

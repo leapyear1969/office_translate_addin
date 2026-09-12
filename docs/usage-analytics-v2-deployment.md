@@ -69,3 +69,9 @@ npm run analytics:delete-user -- <tenant_id> <user_oid> --confirm
 运行 `npm test -- --runInBand`、`npm run typecheck`、`npm run build`。统计 SQL 测试通过 PGlite 的 PostgreSQL 引擎在隔离内存库中执行，测试脚本启用 Node VM 模块；不向真实统计库注入测试账号或模拟用量。
 
 真实环境还需确认管理员普通浏览器登录、Word / Outlook 网页与桌面平台映射、实际分批调用，以及重启后统计连续性。数据库创建和空报表查询可单独验证，但不替代 Entra 与真实 Office 验收。
+
+## 租户组织名称列
+
+`/admin/api` 的租户文本提交量 TOP10 在租户 ID 后显示组织名称。部署更新后的 `server` 和生产构建的 `dist`，重启 Node 服务；启动时自动创建 `usage_analytics.tenants`，不修改历史用量。
+
+用户访问插件 `/api/me` 时，后端使用该已验证租户的 Graph OBO 令牌和现有 `User.Read` 权限读取 `/v1.0/organization?$select=id,displayName`，仅接受 ID 与登录租户一致的组织。成功结果在进程内缓存 24 小时，失败缓存 5 分钟，名称持久保存供历史榜单关联。查询失败不影响登录，也不覆盖已有名称。未获取过名称的历史租户显示“未获取”，该租户用户再次登录插件后可补齐。名称是租户配置的组织显示名称，不代表工商登记全称。

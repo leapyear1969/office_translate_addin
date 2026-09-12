@@ -39,6 +39,33 @@ test('accepts home and customer tenants and uses each verified tenant for OBO', 
     expect(obo).toHaveBeenLastCalledWith(expect.objectContaining({ authority: `${config.authority}/${tid}` }));
   }
 });
+test('organization lookup uses the configured cloud and caches names per verified tenant', async () => {
+  const original = global.fetch;
+  global.fetch = jest.fn(async (url, options) => url.includes('/organization?')
+    ? { ok: true, json: async () => ({ value: [{ id: customer, displayName: 'Customer Company' }, { id: home, displayName: 'Home Company' }] }) }
+    : original(url, options));
+  const auth = createAuth(config);
+  for (const tid of [customer, customer, home]) {
+    expect((await auth.profile('assertion', { tid, oid: 'user' })).organizationName).toBe(tid === customer ? 'Customer Company' : 'Home Company');
+  }
+  const calls = global.fetch.mock.calls.filter(([url]) => url.includes('/organization?'));
+  expect(calls).toHaveLength(2);
+  expect(calls[0][0]).toBe(`${config.graphBase}/v1.0/organization?$select=id,displayName`);
+  expect(calls[0][1].headers.Authorization).toBe('Bearer graph-token');
+});
+
+test.each(['failure', 'mismatch'])('organization %s does not break login or attach another tenant name', async mode => {
+  const original = global.fetch;
+  global.fetch = jest.fn(async (url, options) => {
+    if (!url.includes('/organization?')) return original(url, options);
+    if (mode === 'failure') throw new Error('Graph unavailable');
+    return { ok: true, json: async () => ({ value: [{ id: home, displayName: 'Wrong Company' }] }) };
+  });
+  const profile = await createAuth(config).profile('assertion', { tid: customer, oid: 'user' });
+  expect(profile.tenantId).toBe(customer);
+  expect(profile.organizationName).toBeUndefined();
+});
+
 test('rejects issuer/tenant mismatch and forged customer tokens', async () => {
   const auth = createAuth(config);
   await expect(auth.authenticate(await signed(home, { tid: customer }))).rejects.toMatchObject({ status: 401 });

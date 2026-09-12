@@ -14,10 +14,10 @@ test('adds, edits and removes administrators through forms and preserves drafts 
   document.getElementById('add-admin')!.click();
   const row=document.querySelectorAll('.admin-entry')[1];
   const control=(name:string)=>row.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
-  control('tenant_id').value=tid;control('identity').value='reader@example.invalid';control('tenants').value=tid;
+  control('tenant_id').value=tid;control('identity').value=tid;control('tenants').value=tid;
   const submit=async()=>{document.getElementById('admin-settings-form')!.dispatchEvent(new Event('submit',{cancelable:true}));await settle();};
   await submit();
-  expect(request.mock.calls.at(-1)![1].entries[1]).toEqual({tenant_id:tid,email:'reader@example.invalid',tenants:[tid],can_manage_admins:false});
+  expect(request.mock.calls.at(-1)![1].entries[1]).toEqual({tenant_id:tid,user_oid:tid,tenants:[tid],can_manage_admins:false});
   expect(status).toHaveBeenLastCalledWith('管理员配置已保存，权限立即生效。');
   const scope=document.querySelectorAll<HTMLSelectElement>('[name="scope"]')[1];scope.value='all';scope.dispatchEvent(new Event('change',{bubbles:true}));
   request.mockRejectedValueOnce(new Error('配置已被其他管理员更新'));

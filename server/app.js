@@ -38,7 +38,11 @@ function createApp(config, dependencies) {
     if (req.get('Origin') && req.get('Origin') !== config.origin) return res.status(403).json({ error: '请求来源不被允许。' });
     next();
   });
-  app.use('/api/admin', rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }));
+  const anonymousAdminLimit = rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false,
+    message: { error: '未认证请求过于频繁，请稍后重试。' } });
+  // Anonymous traffic cannot spend a verified user's quota, even behind a shared proxy.
+  app.use('/api/admin', (req, res, next) => /^Bearer (\S+)$/.test(req.get('Authorization') || '')
+    ? next() : anonymousAdminLimit(req, res, next));
   app.use('/api', rateLimit({ windowMs: 60000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, skip: req => /^\/admin(?:\/|$)/.test(req.path),
     message: { error: '请求过于频繁，请稍后重试。' } }));
   app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -46,8 +50,15 @@ function createApp(config, dependencies) {
     const match = /^Bearer (\S+)$/.exec(req.get('Authorization') || '');
     if (!match) return res.status(401).json({ error: '请先通过 Office SSO 登录。' });
     try { req.token = match[1]; req.identity = await services.authenticate(req.token); next(); }
-    catch (error) { res.status(error.status || 401).json({ error: error.status ? error.message : 'SSO 认证失败，请重新登录。' }); }
+    catch (error) {
+      const reject = () => res.status(error.status || 401).json({ error: error.status ? error.message : 'SSO 认证失败，请重新登录。' });
+      if (/^\/admin(?:\/|$)/.test(req.path)) return anonymousAdminLimit(req, res, reject);
+      reject();
+    }
   });
+  app.use('/api/admin', rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: req => JSON.stringify([req.identity.tid.toLowerCase(), req.identity.oid.toLowerCase()]),
+    message: { error: '请求过于频繁，请稍后重试。' } }));
   app.use('/api', express.json({ limit: '6mb' }));
   registerAdmin(app, config, analytics, services);
   const route = fn => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };

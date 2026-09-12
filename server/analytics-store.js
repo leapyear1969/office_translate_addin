@@ -30,6 +30,17 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
       await q('CREATE TABLE IF NOT EXISTS usage_analytics.tenants (tenant_id TEXT PRIMARY KEY, organization_name TEXT NOT NULL)');
       await q('CREATE TABLE IF NOT EXISTS usage_analytics.meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
       await q('CREATE TABLE IF NOT EXISTS usage_analytics.admin_settings (id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL, entries JSONB NOT NULL)');
+      await q(`CREATE TABLE IF NOT EXISTS usage_analytics.admin_settings_audit (
+        revision INTEGER PRIMARY KEY, previous_revision INTEGER NOT NULL,
+        changed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+        actor_tenant_id TEXT NOT NULL, actor_user_oid TEXT NOT NULL, changes JSONB NOT NULL)`);
+      // Block accidental or application-level rewrites; DB owners can still alter DDL.
+      await q(`CREATE OR REPLACE FUNCTION usage_analytics.reject_audit_mutation() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Administrator audit is append-only'; END $$`);
+      await q('DROP TRIGGER IF EXISTS admin_audit_append_only ON usage_analytics.admin_settings_audit');
+      await q(`CREATE TRIGGER admin_audit_append_only BEFORE UPDATE OR DELETE OR TRUNCATE
+        ON usage_analytics.admin_settings_audit FOR EACH STATEMENT EXECUTE FUNCTION usage_analytics.reject_audit_mutation()`);
+      await q('REVOKE ALL ON usage_analytics.admin_settings_audit FROM PUBLIC');
       const version = (await meta()).schema_version;
       if (version && version !== '1') throw new Error('Unsupported statistics schema');
       await q(`CREATE TABLE IF NOT EXISTS usage_analytics.users (
@@ -110,8 +121,24 @@ async function openStore(connectionString, now = Date.now(), injectedClient, ret
       return (await q('SELECT revision,entries FROM usage_analytics.admin_settings WHERE id=1')).rows[0] || {revision:0,entries:[]};
     }),
     saveAdminSettings: value => transaction(async () => {
+      const before = (await q('SELECT revision,entries FROM usage_analytics.admin_settings WHERE id=1 FOR UPDATE')).rows[0];
+      if (!before || before.revision !== value.revision) throw Object.assign(new Error('配置已被其他管理员更新，请重新加载后再修改。'), {status:409});
+      const guid = v => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+      if (!guid(value.actor?.tenant_id) || !guid(value.actor?.user_oid)) throw new Error('Verified audit actor required');
+      const key = e => `${e.tenant_id}:${e.user_oid ? `oid:${e.user_oid}` : `email:${e.email}`}`;
+      // Persist only authorization fields, never request bodies, tokens or profile data.
+      const grant = e => ({tenant_id:e.tenant_id,...(e.user_oid ? {user_oid:e.user_oid} : {email:e.email}),
+        tenants:[...e.tenants].sort(),can_manage_admins:e.can_manage_admins === true});
+      const old = new Map(before.entries.map(e => [key(e),grant(e)]));
+      const updated = new Map(value.entries.map(e => [key(e),grant(e)]));
+      const changes = [...new Set([...old.keys(),...updated.keys()])]
+        .filter(k => JSON.stringify(old.get(k)) !== JSON.stringify(updated.get(k)))
+        .map(k => ({before:old.get(k) || null,after:updated.get(k) || null}));
       const result = await q('UPDATE usage_analytics.admin_settings SET entries=$1::jsonb,revision=revision+1 WHERE id=1 AND revision=$2 RETURNING revision,entries', [JSON.stringify(value.entries),value.revision]);
       if (!result.rows.length) throw Object.assign(new Error('配置已被其他管理员更新，请重新加载后再修改。'), {status:409});
+      await q(`INSERT INTO usage_analytics.admin_settings_audit
+        (revision,previous_revision,actor_tenant_id,actor_user_oid,changes) VALUES ($1,$2,$3,$4,$5::jsonb)`,
+      [result.rows[0].revision,before.revision,value.actor.tenant_id.toLowerCase(),value.actor.user_oid.toLowerCase(),JSON.stringify(changes)]);
       return result.rows[0];
     }),
     gap: time => q("INSERT INTO usage_analytics.meta VALUES ('last_gap_at',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",[String(time)]),

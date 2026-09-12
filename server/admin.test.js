@@ -4,6 +4,29 @@ const tid = '11111111-1111-1111-1111-111111111111', oid = '22222222-2222-2222-22
 const admins = parseAdmins(JSON.stringify([{ tenant_id: tid, user_oid: oid, tenants: [tid] }]));
 const { day } = require('./analytics-store');
 
+test('anonymous and invalid-token floods cannot consume verified identity quotas', async () => {
+  const app = createApp({origin:'https://test.invalid',analyticsAdmins:[
+    ...admins,{tenant_id:tid,user_oid:tid,tenants:[tid]}, {tenant_id:oid,user_oid:oid,tenants:[oid]},
+  ]},{analytics:{adminSettings:async entries=>({revision:1,entries})},authenticate:async token=>{
+    if (token === 'invalid') throw new Error('invalid');
+    return {tid:token === 'other-tenant' ? oid : tid,oid:token === 'other-user' ? tid : oid};
+  }});
+  expect(app.get('trust proxy')).toBe(false);
+  const server = await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
+  const request = token=>fetch(`http://127.0.0.1:${server.address().port}/api/admin/session`, {
+    headers:token ? {Authorization:`Bearer ${token}`} : {},
+  });
+  try {
+    for(let i=0;i<120;i++) expect((await request(i%2 ? 'invalid' : '')).status).toBe(401);
+    expect((await request('')).status).toBe(429);
+    expect((await request('invalid')).status).toBe(429);
+    for(let i=0;i<120;i++) expect((await request(i%2 ? 'owner-token-a' : 'owner-token-b')).status).toBe(200);
+    expect((await request('owner-token-c')).status).toBe(429);
+    expect((await request('other-user')).status).toBe(200);
+    expect((await request('other-tenant')).status).toBe(200);
+  } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
+
 test('global grants require a configured identity and allow explicit tenant filtering', () => {
   const { allowedTenants } = require('./admin');
   for (const identity of [{ user_oid: oid }, { email: 'admin@example.invalid' }]) {
@@ -24,9 +47,9 @@ test('configuration and filters fail closed', () => {
   expect(filters({}, [tid])).toMatchObject({ tenants: [tid], to: day(Date.now()), page: 1, pageSize: 50 });
 });
 
-test('email authorization uses verified Graph identity and cannot use frontend or token email claims',async()=>{
+test('legacy email grants never authorize either original or recycled mailbox holders',async()=>{
   const emailAdmins=parseAdmins(JSON.stringify([{tenant_id:tid,email:'admin@example.invalid',tenants:[tid]}]));
-  const profile=jest.fn(async(_token,identity)=>({id:identity.oid,tenantId:identity.tid,mail:identity.oid===oid?'admin@example.invalid':'other@example.invalid'}));
+  const profile=jest.fn(async(_token,identity)=>({id:identity.oid,tenantId:identity.tid,mail:'admin@example.invalid'}));
   const app=createApp({origin:'https://test.invalid',analyticsAdmins:emailAdmins},{
     analytics:{record(){},profile(){},query:async()=>({}),adminSettings:async seed=>({revision:1,entries:seed})},profile,
     authenticate:async token=>({tid,oid:token==='admin'?oid:tid,email:'admin@example.invalid'}),
@@ -35,9 +58,9 @@ test('email authorization uses verified Graph identity and cannot use frontend o
   const request=token=>fetch(`http://127.0.0.1:${server.address().port}/api/admin/session?email=admin@example.invalid`,{headers:{Authorization:`Bearer ${token}`}});
   try{
     expect((await request('spoof')).status).toBe(403);
-    expect((await request('admin')).status).toBe(200);
-    expect((await request('admin')).status).toBe(200);
-    expect(profile).toHaveBeenCalledTimes(2);
+    expect((await request('admin')).status).toBe(403);
+    expect((await request('admin')).status).toBe(403);
+    expect(profile).not.toHaveBeenCalled();
   }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
 test('authenticated tenant-scoped admin routes, counters and profile whitelisting', async () => {

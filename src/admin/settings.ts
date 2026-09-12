@@ -23,19 +23,18 @@ export async function initSettings(request: (path: string, body?: unknown) => Pr
     }
     const tenant = field('账号登录所属租户 ID', 'tenant_id', entry.tenant_id) as HTMLInputElement;
     tenant.required = true; tenant.pattern = guidPattern; tenant.placeholder = '例如 00000000-0000-0000-0000-000000000000';
-    const kind = field('账号识别方式', 'identity_type', entry.user_oid ? 'user_oid' : 'email', [['email', '邮箱'], ['user_oid', '对象 ID']]);
-    const identity = field('管理员账号', 'identity', entry.user_oid || entry.email || '') as HTMLInputElement;
-    identity.required = true; identity.maxLength = 320;
-    const syncIdentity = () => { identity.type = kind.value === 'email' ? 'email' : 'text'; identity.placeholder = kind.value === 'email' ? 'name@example.com' : '用户对象 ID（GUID）'; if (kind.value === 'user_oid') identity.pattern = guidPattern; else identity.removeAttribute('pattern'); };
-    kind.onchange = syncIdentity; syncIdentity();
+    const identity = field('用户对象 ID', 'identity', entry.user_oid || '') as HTMLInputElement;
+    identity.required = true; identity.maxLength = 36; identity.pattern = guidPattern;
+    identity.placeholder = '用户对象 ID（GUID）';
     const scope = field('可查看的租户', 'scope', entry.tenants.includes('*') ? 'all' : 'selected', [['selected', '指定租户'], ['all', '所有租户（含以后新增）']]);
     const tenants = field('指定租户 ID（逗号或空格分隔）', 'tenants', entry.tenants.filter(t => t !== '*').join(', ')) as HTMLInputElement;
     tenants.maxLength = 10000;
     const syncScope = () => { tenants.parentElement!.hidden = scope.value === 'all'; tenants.required = scope.value !== 'all'; };
     scope.onchange = syncScope; syncScope();
     const role = field('后台角色', 'role', entry.can_manage_admins ? 'manager' : 'reader', [['reader', '查询管理员 · 仅查看报表'], ['manager', '权限管理员 · 可管理所有管理员']]);
-    if (self) { tenant.readOnly = true; kind.disabled = true; identity.readOnly = true; role.disabled = true; }
+    if (self) { tenant.readOnly = true; identity.readOnly = true; role.disabled = true; }
     const note = document.createElement('p'); note.className = 'muted'; note.textContent = self ? '当前账号的登录身份和权限管理资格不能在此移除。' : '权限管理员可以调整所有账号的权限，包括授予所有租户的访问权。'; row.append(note);
+    if (!entry.user_oid && entry.email) note.textContent = `旧邮箱条目 ${entry.email} 已停用。请核对原获批账号，填写该租户内的对象 ID，或移除此条目。`;
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-admin'; remove.textContent = '移除管理员'; remove.disabled = self;
     remove.onclick = () => { row.remove(); markDirty(); el('add-admin').focus(); };
     row.append(remove); container.append(row);
@@ -54,14 +53,14 @@ export async function initSettings(request: (path: string, body?: unknown) => Pr
   };
   el('admin-settings-form').oninput = markDirty;
   el('admin-settings-form').onchange = markDirty;
-  el('add-admin').onclick = () => { addRow({tenant_id: '', email: '', tenants: [], can_manage_admins: false}).focus(); markDirty(); };
+  el('add-admin').onclick = () => { addRow({tenant_id: '', user_oid: '', tenants: [], can_manage_admins: false}).focus(); markDirty(); };
   el('reload-admins').onclick = () => { void reload(); };
   el('admin-settings-form').onsubmit = async event => {
     event.preventDefault();
     if (!saved) return;
     const entries: Admin[] = Array.from(container.querySelectorAll<HTMLFieldSetElement>('.admin-entry')).map(row => {
       const value = (name: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`)!.value.trim();
-      return {tenant_id:value('tenant_id'), [value('identity_type')]:value('identity'), tenants:value('scope') === 'all' ? ['*'] : value('tenants').split(/[,，\s]+/).filter(Boolean), can_manage_admins:value('role') === 'manager'};
+      return {tenant_id:value('tenant_id'), user_oid:value('identity'), tenants:value('scope') === 'all' ? ['*'] : value('tenants').split(/[,，\s]+/).filter(Boolean), can_manage_admins:value('role') === 'manager'};
     });
     fields.disabled = true; status('正在保存管理员配置…');
     try { render(await request('/api/admin/settings', {revision:saved.revision,entries})); status('管理员配置已保存，权限立即生效。'); }

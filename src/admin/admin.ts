@@ -4,6 +4,7 @@ type Row = Record<string, any>;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => el<HTMLInputElement>(id);
 const isApi = location.pathname === '/admin/api';
+const isSettings = location.pathname === '/admin/settings';
 let msal: PublicClientApplication;
 let InteractionRequiredAuthError: typeof import('@azure/msal-browser').InteractionRequiredAuthError;
 let scope = '';
@@ -38,8 +39,8 @@ async function token() {
   try { return (await msal.acquireTokenSilent({ scopes: [scope], account })).accessToken; }
   catch (error) { if (error instanceof InteractionRequiredAuthError) throw new Error('登录已过期或需要授权，请点击“重新登录”。'); throw new Error('无法获取访问权限，请重新登录。'); }
 }
-async function get(path: string) {
-  const response = await fetch(path, { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store', signal: AbortSignal.timeout(15000) });
+async function get(path: string, body?: unknown) {
+  const response = await fetch(path, { method: body === undefined ? 'GET' : 'PUT', body: body === undefined ? undefined : JSON.stringify(body), headers: { Authorization: `Bearer ${await token()}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, cache: 'no-store', signal: AbortSignal.timeout(15000) });
   if (!response.ok) {
     let message = `查询失败（${response.status}），请稍后重试。`;
     try { const data = await response.json(); if (typeof data.error === 'string') message = data.error; } catch { /* Rate limit may return text. */ }
@@ -114,9 +115,10 @@ function collect() {
   for (const [id, key] of [['from', 'from'], ['to', 'to'], ['tenant', 'tenant'], ['host', 'host'], ['client-type', 'client_type'], ['search', 'search']]) currentParams.set(key, input(id).value);
 }
 async function main() {
-  el(isApi ? 'api-link' : 'usage-link').setAttribute('aria-current', 'page');
-  el('page-title').textContent = isApi ? 'API 用量' : '用户使用';
-  el('page-description').textContent = isApi ? '区分后端请求与上游调用，查看实际请求规模。' : '查看谁在使用，以及来自哪个平台与客户端。';
+  el(isSettings ? 'settings-link' : isApi ? 'api-link' : 'usage-link').setAttribute('aria-current', 'page');
+  el('page-title').textContent = isSettings ? '管理员设置' : isApi ? 'API 用量' : '用户使用';
+  el('page-description').textContent = isSettings ? '管理后台访问权限，无需修改服务器配置。' : isApi ? '区分后端请求与上游调用，查看实际请求规模。' : '查看谁在使用，以及来自哪个平台与客户端。';
+  if (isSettings) { document.querySelector<HTMLElement>('.badge')!.hidden = true; document.querySelector<HTMLElement>('footer')!.hidden = true; }
   for (const id of ['interfaces-panel', 'top-users-panel', 'top-tenants-panel']) el(id).hidden = !isApi;
   el('platform-note').textContent = isApi ? '两个层级独立统计，不相加。提交文本量不是计费字符数。' : '同一用户可出现在多个分组中，总人数按账号去重。';
   el('trend-note').textContent = isApi ? '绿色：后端 · 灰蓝：上游' : '绿色：翻译请求 · 灰蓝：使用人数';
@@ -133,11 +135,17 @@ async function main() {
   if (result?.account) msal.setActiveAccount(result.account);
   else if (!msal.getActiveAccount() && msal.getAllAccounts().length === 1) msal.setActiveAccount(msal.getAllAccounts()[0]);
   el('login').onclick = () => { void msal.loginRedirect({ scopes: [scope], prompt: 'select_account' }).catch(() => status('无法启动登录，请稍后重试。', true)); };
-  el('logout').onclick = () => { el('workspace').hidden = true; void msal.logoutRedirect({ postLogoutRedirectUri: config.redirectUri }).catch(() => status('退出失败，请重试。', true)); };
+  el('logout').onclick = () => { el('workspace').hidden = true; el('admin-settings').hidden = true; void msal.logoutRedirect({ postLogoutRedirectUri: config.redirectUri }).catch(() => status('退出失败，请重试。', true)); };
   if (!msal.getActiveAccount()) { status('请使用获授权的管理员账号登录。'); return; }
   el('account').textContent = msal.getActiveAccount()?.username || '';
   el('login').textContent = '重新登录'; el('logout').hidden = false;
   const access = await get('/api/admin/session');
+  el('settings-link').hidden = !access.canManageAdmins;
+  if (isSettings) {
+    if (!access.canManageAdmins) { status('此账号没有管理员配置权限，请联系后台权限管理员。', true); return; }
+    const { initSettings } = await import('./settings');
+    await initSettings(get, status); return;
+  }
   if (access.tenants.includes('*')) {
     const tenant = document.createElement('input'); tenant.id = 'tenant'; tenant.placeholder = '所有租户（可输入租户 ID 筛选）';
     tenant.setAttribute('aria-label', '租户 ID，留空查询所有租户'); el('tenant').replaceWith(tenant);

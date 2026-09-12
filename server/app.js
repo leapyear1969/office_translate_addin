@@ -20,7 +20,7 @@ function createApp(config, dependencies) {
     scope: config.resource ? `${config.adminClientId === config.clientId ? config.clientId : config.resource.replace(/\/$/, '')}/access_as_user` : '',
     redirectUri: `${config.origin}/admin/usage`,
   }));
-  app.get(['/admin/usage', '/admin/api'], (req, res, next) => {
+  app.get(['/admin/usage', '/admin/api', '/admin/settings'], (req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     req.url = '/admin.html'; next();
   });

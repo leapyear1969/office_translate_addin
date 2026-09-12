@@ -1,6 +1,6 @@
 # V2 使用统计：部署与验收
 
-入口为 `/admin/usage`（用户使用）、`/admin/api`（API 用量），两个页面独立于 Office，只读访问。
+入口为 `/admin/usage`（用户使用）、`/admin/api`（API 用量）和 `/admin/settings`（管理员设置），独立于 Office。报表只读；管理员设置由具有权限管理资格的账号维护。
 
 ## 当前配置
 
@@ -29,12 +29,12 @@
 
 浏览器采用 MSAL 授权码 + PKCE。复用同一应用时 scope 为 `${CLIENT_ID}/access_as_user`，使用 GUID 标识自身 API；配置独立浏览器应用时使用 `${SSO_RESOURCE}/access_as_user`。后端沿用现有签名、发行者、受众、有效期和 scope 校验；Graph 令牌与 ID Token 不能代替本 API 访问令牌。多租户登录需应用注册支持；也可将 `ADMIN_LOGIN_TENANT` 设为明确租户 GUID。
 
-`ANALYTICS_ADMINS` 为服务端 JSON 白名单，示例结构见 `.env.example`：
+`ANALYTICS_ADMINS` 现在仅用于首次导入。后续通过 `/admin/settings` 配置并立即生效，详见 [网页权限管理](admin-settings.md)。示例结构见 `.env.example`：
 
 - 优先支持真实 `tenant_id + user_oid`，不需为了授权额外获取 Graph 资料。
 - 也支持 `tenant_id + email`：后端使用已验证令牌获取 Graph `/me`，核验返回 ID 与令牌对象 ID、租户一致后，再按邮箱授权。沿用已有 OBO、`User.Read` 权限及同意，资料最多缓存 5 分钟。不能根据客户端字段或未经核验的邮箱声明放行。
 - 各管理员只能查询配置中的租户；`"tenants":["*"]` 明确授予所有现有及未来新增租户的查询权限。普通租户列表仍限制范围，无默认管理员，登录成功不等于有报表权限。全租户管理员页面默认查询所有租户，可输入租户 ID 筛选。
-- 白名单修改后重启。网页不提供配置或统计删除接口。
+- 首次导入后权限保存在 PostgreSQL 中，可由权限管理员通过网页配置。网页仍不提供统计删除接口。
 
 用户已确认添加 `https://www.majun.fun:30260/admin/usage` 的 SPA 回调地址。当前应用读取注册元数据返回 403，未独立读取确认；真实管理员浏览器登录待用户同步服务器代码后验收。本次只完成本地代码和数据库配置，不更新线上 Node 服务。
 

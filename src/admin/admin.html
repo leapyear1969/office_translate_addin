@@ -4,9 +4,18 @@
 <body>
   <header><div class="brand"><span class="mark" aria-hidden="true">译</span><div><strong>翻译插件</strong><small>使用统计后台</small></div></div><div class="account"><span id="account"></span><button id="login" type="button">管理员登录</button><button id="logout" type="button" hidden>退出</button></div></header>
   <main>
-    <nav aria-label="统计页面"><a id="usage-link" href="/admin/usage">用户使用</a><a id="api-link" href="/admin/api">API 用量</a></nav>
+    <nav aria-label="统计页面"><a id="usage-link" href="/admin/usage">用户使用</a><a id="api-link" href="/admin/api">API 用量</a><a id="settings-link" href="/admin/settings" hidden>管理员设置</a></nav>
     <div class="heading"><div><p class="eyebrow">WORD & OUTLOOK</p><h1 id="page-title">用户使用</h1><p id="page-description">查看谁在使用，以及来自哪个平台与客户端。</p></div><span class="badge">北京时间 · 按日汇总</span></div>
     <p id="status" role="status" aria-live="polite">正在读取登录配置…</p>
+    <section id="admin-settings" hidden>
+      <p class="notice">设置谁可以进入后台、查看哪些租户，以及管理其他管理员。修改后点击“保存更改”立即生效。</p>
+      <form id="admin-settings-form">
+        <fieldset id="settings-fields"><legend class="settings-legend">后台管理员</legend>
+          <div id="admin-entries"></div>
+          <div class="settings-actions"><button id="add-admin" type="button">添加管理员</button><button id="save-admins" type="submit">保存更改</button><button id="reload-admins" type="button">放弃更改并重新加载</button><span id="settings-state" role="status"></span></div>
+        </fieldset>
+      </form>
+    </section>
     <section id="workspace" hidden>
       <form id="filters" class="filters">
         <label>开始日期<input id="from" type="date" required></label><label>截止日期<input id="to" type="date" required></label>

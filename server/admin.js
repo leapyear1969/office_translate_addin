@@ -5,8 +5,9 @@ function parseAdmins(text = '[]') {
   const entries = JSON.parse(text);
   if (!Array.isArray(entries) || entries.some(e => !e || !guid(e.tenant_id) || !(e.user_oid !== undefined
     ? guid(e.user_oid) && e.email === undefined : typeof e.email === 'string' && /^[^\s@]+@[^\s@]+$/.test(e.email))
+    || (e.can_manage_admins !== undefined && typeof e.can_manage_admins !== 'boolean')
     || !Array.isArray(e.tenants) || !e.tenants.length || e.tenants.some(t => t !== '*' && !guid(t)))) throw new Error('Invalid ANALYTICS_ADMINS');
-  return entries.map(e => ({ tenant_id: e.tenant_id.toLowerCase(), ...(e.user_oid ? { user_oid:e.user_oid.toLowerCase() } : { email:e.email.toLowerCase() }), tenants: e.tenants.map(t => t.toLowerCase()) }));
+  return entries.map(e => ({ tenant_id: e.tenant_id.toLowerCase(), ...(e.user_oid ? { user_oid:e.user_oid.toLowerCase() } : { email:e.email.toLowerCase() }), tenants: [...new Set(e.tenants.map(t => t.toLowerCase()))], ...(e.can_manage_admins !== undefined ? {can_manage_admins:e.can_manage_admins} : {}) }));
 }
 function allowedTenants(identity, admins = []) {
   return [...new Set(admins.filter(e => e.tenant_id === identity.tid.toLowerCase() && e.user_oid === identity.oid.toLowerCase()).flatMap(e => e.tenants))];
@@ -29,10 +30,16 @@ function filters(query, tenants, now = Date.now()) {
 }
 function registerAdmin(app, config, analytics, services) {
   const profiles = new Map();
+  const seed = (config.analyticsAdmins || []).map(e => ({...e,can_manage_admins:e.can_manage_admins ?? e.tenants.includes('*')}));
+  const keyOf = e => `${e.tenant_id}:${e.user_oid ? `oid:${e.user_oid}` : `email:${e.email}`}`;
   app.use('/api/admin', async (req, res, next) => {
-    req.adminTenants = allowedTenants(req.identity, config.analyticsAdmins);
-    const candidates = (config.analyticsAdmins || []).filter(e => e.email && e.tenant_id === req.identity.tid.toLowerCase());
-    if (!req.adminTenants.length && candidates.length) {
+    try {
+      req.adminSettings = await analytics.adminSettings(seed);
+    } catch { return res.status(503).json({error:'管理员配置暂不可用，请稍后重试。'}); }
+    const entries = req.adminSettings.entries;
+    let matched = entries.filter(e => e.tenant_id === req.identity.tid.toLowerCase() && e.user_oid === req.identity.oid.toLowerCase());
+    const candidates = entries.filter(e => e.email && e.tenant_id === req.identity.tid.toLowerCase());
+    if (candidates.length) {
       try {
         const key = `${req.identity.tid}:${req.identity.oid}`;
         let cached = profiles.get(key);
@@ -43,13 +50,36 @@ function registerAdmin(app, config, analytics, services) {
           if (profiles.size >= 100) profiles.delete(profiles.keys().next().value);
           profiles.set(key,cached);
         }
-        req.adminTenants = [...new Set(candidates.filter(e => e.email === cached.mail).flatMap(e => e.tenants))];
-      } catch { return res.status(403).json({error:'无法核验管理员邮箱。请确认此账号的用户资料权限及同意，或由维护人员配置真实对象 ID。'}); }
+        matched = [...matched,...candidates.filter(e => e.email === cached.mail)];
+      } catch { if (!matched.length) return res.status(403).json({error:'无法核验管理员邮箱。请确认此账号的用户资料权限及同意，或由维护人员配置真实对象 ID。'}); }
     }
+    req.adminTenants = [...new Set(matched.flatMap(e => e.tenants))];
+    req.canManageAdmins = matched.some(e => e.can_manage_admins === true);
+    req.adminKeys = matched.map(keyOf);
     if (!req.adminTenants.length) return res.status(403).json({ error: '此账号没有统计后台查询权限。' });
     next();
   });
-  app.get('/api/admin/session', (req, res) => res.json({ tenants: req.adminTenants }));
+  app.get('/api/admin/session', (req, res) => res.json({ tenants: req.adminTenants, canManageAdmins:req.canManageAdmins }));
+  app.get('/api/admin/settings', (req,res) => {
+    if (!req.canManageAdmins) return res.status(403).json({error:'此账号没有管理员配置权限。'});
+    res.json({...req.adminSettings,selfKeys:req.adminKeys});
+  });
+  app.put('/api/admin/settings', async (req,res) => {
+    if (!req.canManageAdmins) return res.status(403).json({error:'此账号没有管理员配置权限。'});
+    try {
+      if (!Number.isSafeInteger(req.body?.revision) || req.body.revision < 1) throw bad('配置版本无效，请重新加载。');
+      if (req.body.revision !== req.adminSettings.revision) throw Object.assign(new Error('配置已被其他管理员更新，请重新加载后再修改。'),{status:409});
+      let entries;
+      try { entries = parseAdmins(JSON.stringify(req.body.entries)); } catch { throw bad('请输入有效的登录租户 ID、邮箱或对象 ID，以及可查看租户。'); }
+      if (!entries.length || entries.length > 100) throw bad('请保留 1 至 100 位管理员。');
+      if (new Set(entries.map(keyOf)).size !== entries.length) throw bad('同一登录租户中的管理员账号不能重复。');
+      if (!entries.some(e => e.can_manage_admins === true)) throw bad('至少保留一位可以管理管理员的账号。');
+      if (!entries.some(e => req.adminKeys.includes(keyOf(e)) && e.can_manage_admins === true)) throw bad('不能移除自己的管理员配置权限或修改自己的登录身份。');
+      const saved = await analytics.saveAdminSettings({revision:req.body.revision,entries});
+      profiles.clear();
+      res.json({...saved,selfKeys:req.adminKeys});
+    } catch (error) { res.status(error.status || 503).json({error:error.status ? error.message : '保存暂不可用，请重新加载确认配置后重试。'}); }
+  });
   for (const [route, mode] of [['overview', 'usage'], ['api-usage', 'api']]) {
     app.get(`/api/admin/${route}`, async (req, res) => {
       try { res.json(await analytics.query(filters(req.query, req.adminTenants), mode)); }

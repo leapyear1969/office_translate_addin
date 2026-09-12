@@ -46,6 +46,15 @@ beforeEach(() => {
 });
 afterEach(() => { global.fetch = originalFetch; });
 
+test('settings URL denies readers and exposes the navigation only to managers', async () => {
+  history.replaceState(null, '', '/admin/settings');
+  await import('./admin'); await settle();
+  expect(document.getElementById('settings-link')!.hidden).toBe(true);
+  expect(document.getElementById('admin-settings')!.hidden).toBe(true);
+  expect(document.getElementById('status')!.textContent).toContain('没有管理员配置权限');
+  expect((global.fetch as jest.Mock).mock.calls.some(([url]) => url === '/api/admin/settings')).toBe(false);
+});
+
 test('global administrator defaults to all tenants and can filter a tenant', async () => {
   (global.fetch as jest.Mock).mockImplementation(async (url: string) => ({ ok: true, json: async () => url === '/admin/config'
     ? { configured: true, scope: 's' } : url === '/api/admin/session' ? { tenants: ['*'] } : payload }));

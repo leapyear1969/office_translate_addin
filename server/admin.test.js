@@ -28,7 +28,7 @@ test('email authorization uses verified Graph identity and cannot use frontend o
   const emailAdmins=parseAdmins(JSON.stringify([{tenant_id:tid,email:'admin@example.invalid',tenants:[tid]}]));
   const profile=jest.fn(async(_token,identity)=>({id:identity.oid,tenantId:identity.tid,mail:identity.oid===oid?'admin@example.invalid':'other@example.invalid'}));
   const app=createApp({origin:'https://test.invalid',analyticsAdmins:emailAdmins},{
-    analytics:{record(){},profile(){},query:async()=>({})},profile,
+    analytics:{record(){},profile(){},query:async()=>({}),adminSettings:async seed=>({revision:1,entries:seed})},profile,
     authenticate:async token=>({tid,oid:token==='admin'?oid:tid,email:'admin@example.invalid'}),
   });
   const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
@@ -41,7 +41,7 @@ test('email authorization uses verified Graph identity and cannot use frontend o
   }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
 test('authenticated tenant-scoped admin routes, counters and profile whitelisting', async () => {
-  const analytics = { record: jest.fn(), profile: jest.fn(), query: jest.fn(async () => ({ summary: { users: 1 } })) };
+  const analytics = { record: jest.fn(), profile: jest.fn(), query: jest.fn(async () => ({ summary: { users: 1 } })),adminSettings:async seed=>({revision:1,entries:seed}) };
   const app = createApp({ origin: 'https://test.invalid', analyticsAdmins: admins }, {
     analytics, authenticate: async token => ({ tid, oid: token === 'admin' ? oid : tid }),
     profile: async () => ({ displayName: 'Name', mail: 'mail', photo: 'private-photo', token: 'secret' }),

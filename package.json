@@ -4,6 +4,7 @@
   "private": true,
   "description": "Outlook in-place mail translation with Azure China Translator and Office SSO",
   "scripts": {
+    "analytics:recover-admin": "node scripts/recover-analytics-admin.js",
     "analytics:delete-user": "node scripts/delete-analytics-user.js",
     "build": "node scripts/generate-manifest.js all && webpack --mode production",
     "dev-server": "node scripts/generate-manifest.js && webpack serve --mode development",

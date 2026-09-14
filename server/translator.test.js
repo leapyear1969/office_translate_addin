@@ -1,5 +1,27 @@
 const { translateHtml, detectHtml, createTranslator } = require('./translator');
 
+describe('mail subject translation', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; });
+  const service = () => createTranslator({ translatorKey: 'test', translatorEndpoint: 'https://translator.example/' });
+  test('preserves literal angle brackets and ampersands by submitting plain text', async () => {
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => [{ translations: [{ text: '会议 <通知> & 更新' }] }] }));
+    expect(await service().translateSubject('Meeting <notice> & update', 'zh-Hans')).toBe('会议 <通知> & 更新');
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url.searchParams.has('textType')).toBe(false);
+    expect(JSON.parse(options.body)).toEqual([{ Text: 'Meeting <notice> & update' }]);
+  });
+  test('does not submit empty subjects', async () => {
+    global.fetch = jest.fn();
+    expect(await service().translateSubject('', 'en')).toBe('');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+  test('rejects blank translations', async () => {
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => [{ translations: [{ text: ' ' }] }] }));
+    await expect(service().translateSubject('Meeting', 'en')).rejects.toThrow('标题翻译结果为空');
+  });
+});
+
 describe('Word paragraph translation', () => {
   const originalFetch = global.fetch;
   afterEach(() => { global.fetch = originalFetch; });

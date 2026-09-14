@@ -12,6 +12,64 @@ function setup() {
   (api as jest.Mock).mockResolvedValue({ html: '<p>你好</p>' });
   return { item, setAsync };
 }
+
+function setupSubject() {
+  const context = setup();
+  const subjectSet = jest.fn((_text, cb) => cb({ status: 'succeeded' }));
+  Object.assign(context.item, { subject: 'Meeting <notice>' });
+  Object.assign(context.item.display, { subject: { setAsync: subjectSet } });
+  (api as jest.Mock).mockResolvedValue({ html: '<p>你好</p>', subject: '会议通知' });
+  return { ...context, subjectSet };
+}
+
+test('translates and restores the displayed subject without changing the original', async () => {
+  const { item, subjectSet } = setupSubject();
+  await translateCurrentMessage('zh-Hans');
+  expect(api).toHaveBeenCalledWith('/api/translate', 'token', { html: '<p>Hello</p>', subject: 'Meeting <notice>', to: 'zh-Hans' });
+  expect(subjectSet).toHaveBeenLastCalledWith('会议通知', expect.any(Function));
+  await mail.showOriginalMessage();
+  expect(subjectSet).toHaveBeenLastCalledWith('Meeting <notice>', expect.any(Function));
+  expect((item as any).subject).toBe('Meeting <notice>');
+});
+
+test('translates a subject-only message', async () => {
+  const { item, subjectSet } = setupSubject();
+  item.body.getAsync.mockImplementation((_type, cb) => cb({ status: 'succeeded', value: '' }));
+  await translateCurrentMessage('zh-Hans');
+  expect(subjectSet).toHaveBeenCalledWith('会议通知', expect.any(Function));
+});
+
+test.each([undefined, '', 'x'.repeat(256)])('rejects invalid title translations before changing the display (%#)', async subject => {
+  const { subjectSet, setAsync } = setupSubject();
+  (api as jest.Mock).mockResolvedValue({ html: '<p>你好</p>', subject });
+  await expect(translateCurrentMessage('zh-Hans')).rejects.toThrow('标题译文无效');
+  expect(setAsync).not.toHaveBeenCalled();
+  expect(subjectSet).not.toHaveBeenCalled();
+});
+
+test('reports partial success if the client rejects the subject display', async () => {
+  const { subjectSet } = setupSubject();
+  subjectSet.mockImplementation((_text, cb) => cb({ status: 'failed' }));
+  await expect(translateCurrentMessage('zh-Hans')).rejects.toThrow('正文已翻译，但标题显示失败');
+});
+
+test('does not set the title if selection changes while setting the body', async () => {
+  const { setAsync, subjectSet } = setupSubject();
+  setAsync.mockImplementation((_html, _options, cb) => {
+    (Office.context.mailbox as any).item = { itemId: 'b' };
+    cb({ status: 'succeeded' });
+  });
+  await expect(translateCurrentMessage('zh-Hans')).rejects.toThrow('邮件已切换');
+  expect(subjectSet).not.toHaveBeenCalled();
+});
+
+test('explains when only the body can be displayed', async () => {
+  const { item } = setup();
+  Object.assign(item, { subject: 'Meeting' });
+  await translateCurrentMessage('zh-Hans');
+  expect(item.notificationMessages.replaceAsync).toHaveBeenLastCalledWith('mail-translation-status',
+    expect.objectContaining({ message: expect.stringContaining('当前 Outlook 不支持标题显示接口') }), expect.any(Function));
+});
 test('authenticates, translates the entire HTML and replaces only the displayed body', async () => {
   const { setAsync } = setup();
   await translateCurrentMessage('zh-Hans');

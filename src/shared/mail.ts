@@ -46,18 +46,33 @@ export function notifyConsentRequired(item: Office.MessageRead): void {
 }
 const running = new Set<string | Office.MessageRead>();
 
+function displayedSubject(item: Office.MessageRead): Office.DisplayedSubject | null {
+  return typeof item.display?.subject?.setAsync === 'function' ? item.display.subject : null;
+}
+
+async function setSubject(item: Office.MessageRead, subject: string, restoring = false): Promise<void> {
+  if (!isCurrent(item)) throw new Error('邮件已切换，请重新操作。');
+  const display = displayedSubject(item);
+  if (!display) return;
+  if (subject.length > 255) throw new Error('邮件标题超过 Outlook 的 255 字符显示限制，请重新打开邮件查看原文。');
+  await officeCall<void>(callback => display.setAsync(subject, callback),
+    restoring ? '正文已恢复，但标题恢复失败，请重新打开邮件查看原文。' : '正文已翻译，但标题显示失败，请重试。',
+    '邮件标题显示超时，请重新打开邮件后重试。');
+}
+
 export async function showOriginalMessage(target?: string): Promise<void> {
   const item = currentItem();
   if (!item) throw new Error('请先选择一封邮件。');
   const displayed = getDisplayedBody(item);
   if (!displayed) throw new Error('当前 Outlook 不支持恢复显示，请重新打开邮件查看原文。');
   if (running.has(item.itemId || item)) throw new Error('当前邮件正在翻译，请稍候。');
-  // Translation changes display.body only. body.getAsync still reads the original,
-  // including when this action starts in a fresh task-pane runtime.
+  // Display overrides leave body.getAsync and item.subject unchanged, including
+  // when this action starts in a fresh task-pane runtime.
   const html = await bodyHtml(item);
   if (!isCurrent(item)) throw new Error('邮件已切换，请在当前邮件上重新点击“显示原文”。');
   await officeCall<void>(callback => displayed.setAsync(html, { coercionType: Office.CoercionType.Html }, callback),
     '原文显示失败，请重试或重新打开邮件。', '显示原文超时：Outlook 正文显示接口未响应，请重新打开邮件查看原文。');
+  if (isCurrent(item) && typeof item.subject === 'string') await setSubject(item, item.subject, true);
   notifyOriginalDisplayed(item, target);
 }
 
@@ -81,9 +96,9 @@ export function notifyOriginalDisplayed(item: Office.MessageRead, target?: strin
   notifyMessageAction(item, '已显示原文。', actionText, 'translateMessage',
     '已显示原文。请点击功能区中的“翻译邮件”重新翻译。');
 }
-function notifyTranslationComplete(item: Office.MessageRead): void {
-  notifyMessageAction(item, '翻译完成。', '显示原文', 'showOriginal',
-    '翻译完成。请重新打开邮件查看原文。');
+function notifyTranslationComplete(item: Office.MessageRead, message = '翻译完成。'): void {
+  notifyMessageAction(item, message, '显示原文', 'showOriginal',
+    `${message}请重新打开邮件查看原文。`);
 }
 export async function translateCurrentMessage(target: string, session?: Session, expectedItem?: Office.MessageRead): Promise<void> {
   const item = expectedItem || currentItem();
@@ -100,16 +115,24 @@ export async function translateCurrentMessage(target: string, session?: Session,
     if (!isCurrent(item)) throw new Error('邮件已切换，已取消应用译文。');
     notify(item, '正在读取邮件正文…');
     const html = await bodyHtml(item);
-    if (!html.trim()) throw new Error('这封邮件没有可翻译的正文。');
+    const subject = typeof item.subject === 'string' ? item.subject : '';
+    const canTranslateSubject = !!displayedSubject(item) && !!subject.trim();
+    if (!html.trim() && !canTranslateSubject) throw new Error('这封邮件没有可翻译的正文，或当前客户端不支持标题翻译。');
     notify(item, '正在翻译整封邮件…');
-    const result = await api<{ html: string }>('/api/translate', authenticated.token, { html, to: target });
+    const result = await api<{ html: string; subject?: string }>('/api/translate', authenticated.token,
+      { html: html || '<p></p>', to: target, ...(canTranslateSubject ? { subject } : {}) });
     if (!isCurrent(item)) throw new Error('邮件已切换，已取消应用译文。');
     if (typeof result.html !== 'string' || !result.html || result.html.length > 1000000) throw new Error('译文无效或超过显示限制。');
+    if (canTranslateSubject && (typeof result.subject !== 'string' || !result.subject.trim() || result.subject.length > 255)) {
+      throw new Error('标题译文无效或超过 Outlook 的 255 字符显示限制，原文保持不变。');
+    }
     notify(item, '正在显示译文…');
     await officeCall<void>(callback => displayed.setAsync(result.html, { coercionType: Office.CoercionType.Html }, callback),
       '译文显示失败，原始邮件未修改。',
       '由世纪互联运营的Outlook on the Web目前还不支持该接口，请使用Outlook客户端体验该功能。');
-    notifyTranslationComplete(item);
+    if (canTranslateSubject) await setSubject(item, result.subject!);
+    notifyTranslationComplete(item, subject.trim() && !canTranslateSubject
+      ? '正文翻译完成。当前 Outlook 不支持标题显示接口，标题保持原文。' : undefined);
   } catch (error) {
     if ((error as { code?: string }).code === 'consent_required') notifyConsentRequired(item);
     else notify(item, error instanceof Error ? error.message : '翻译失败，请重试。', true);

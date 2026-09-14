@@ -90,7 +90,15 @@ function createApp(config, dependencies) {
     if (typeof req.body.to !== 'string' || !/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(req.body.to)) {
       return res.status(400).json({ error: '目标语言无效。' });
     }
-    res.json({ html: await business(req, 'translate', () => services.translate(req.body.html, req.body.to)) });
+    const { subject, html, to } = req.body;
+    if (subject !== undefined && (typeof subject !== 'string' || subject.length > 10000)) {
+      return res.status(400).json({ error: '邮件标题无效或过长。' });
+    }
+    res.json(await business(req, 'translate', async () => {
+      const translated = { html: await services.translate(html, to) };
+      if (subject !== undefined) translated.subject = await services.translateSubject(subject, to);
+      return translated;
+    }));
   }));
   app.post('/api/translate/word', route(async (req, res) => {
     const { paragraphs, to } = req.body || {};

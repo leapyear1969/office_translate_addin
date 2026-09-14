@@ -93,6 +93,13 @@ function createTranslator(config) {
     } finally { recordRequest('upstream', method, started, success, text.reduce((sum, value) => sum + value.length, 0)); }
   }
   return {
+    translateSubject: async (subject, to) => {
+      if (!subject.trim()) return subject;
+      const response = await call('translate', [subject], to);
+      const translated = response[0].translations[0].text;
+      if (!translated.trim()) throw new Error('标题翻译结果为空，请重试。');
+      return translated;
+    },
     translateWord: async (paragraphs, to) => {
       const translated = [];
       const started = Date.now();

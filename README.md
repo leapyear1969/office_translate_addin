@@ -1,6 +1,19 @@
 # Office 翻译插件（Outlook / Word）
 
-Outlook 邮件翻译与 Word 文档翻译共用本项目的认证、授权、语言检测和翻译后台。
+Outlook 邮件翻译与 Word 文档翻译共用认证、授权和翻译路由：浏览器本地模型优先，Azure Translator F0 兜底。
+
+## 本地优先与免费云额度
+
+- 运行时检测 `LanguageDetector`、`Translator` 以及源/目标语言模型是否可用；本地成功时不向翻译后台发送正文或标题。
+- 两个面板底部均有“本地翻译”入口，选择模型源语言和目标语言，点击“准备本地模型”。首次需要联网下载；模型是否在不同 Office 宿主间共享由宿主决定。准备语言对不会改变原有翻译目标设置。
+- 自动预览没有用户激活时，不主动下载模型；本地 API 缺失、权限拒绝、语言不支持、检测置信度不足或 75 秒超时，整次请求回退 Azure。模型输出按文本写回，保留邮件图片、链接和 Word 格式标记；逐文本片段翻译可能降低跨格式句子的上下文质量。
+- **部署必须确认 `TRANSLATOR_KEY` 对应 Azure F0 资源。** 每月 200 万字符由 Azure 按整个资源统计和限制，所有用户及其他使用该密钥的应用共享。代码不会把付费 SKU 自动变成免费 SKU，也不使用后台分析统计替代 Azure 计费数据。
+- 收到 Azure `403001` 后，返回 `cloud_quota_exhausted` 和“本月云翻译额度已用完”，本服务实例本月不再调用 Azure；UTC 月份变化后允许重试。普通 429 限流和认证失败不会被标为额度耗尽。阻断标记保存在进程内，重启/其他实例可能再探测一次，实际免费限额仍由 Azure F0 执行。
+- 云额度耗尽不会禁用本地路径；本地也不可用时保留原文并提示。现有 SSO 登录仍然保留，因此这是翻译推理本地化，不是整个加载项完全离线。后台分析目前仅统计云端请求，本地翻译不计入其中。
+
+不能仅凭安装 Edge 就假定 Office Add-in 支持本地 API。WebView2、Office 网页版跨源 iframe 的权限策略、浏览器版本和组织策略都需要在真实宿主验证；模型下载成功也仅代表当前环境和语言对可用。“零云翻译费用”不代表取消应用原有的长度、超时和文档安全限制。
+
+参考：[Edge Translator API](https://learn.microsoft.com/en-us/microsoft-edge/web-platform/translator-api)、[Language Detector API](https://learn.microsoft.com/en-us/microsoft-edge/web-platform/languagedetector-api)、[Azure 错误码](https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/reference/status-response-codes)。
 
 ## 分宿主构建与清单
 

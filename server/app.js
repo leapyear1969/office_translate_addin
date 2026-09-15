@@ -116,7 +116,7 @@ function createApp(config, dependencies) {
   app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在。' }));
   app.use((error, _req, res, _next) => {
     const status = error.type === 'entity.too.large' ? 413 : error instanceof SyntaxError ? 400 : error.status || 502;
-    res.status(status).json({ code: error.code === 'consent_required' ? error.code : undefined, error: status === 413 ? '翻译内容过大。' : status === 400 ? '请求格式无效。'
+    res.status(status).json({ code: ['consent_required', 'cloud_quota_exhausted'].includes(error.code) ? error.code : undefined, error: status === 413 ? '翻译内容过大。' : status === 400 ? '请求格式无效。'
       : error.status ? error.message : error.name === 'TimeoutError' ? '请求超时，请重试。' : '翻译服务请求失败，请稍后重试。' });
   });
   return app;

@@ -63,7 +63,13 @@ async function detectHtml(html, detect) {
 }
 
 function createTranslator(config) {
+  let exhaustedMonth;
+  const month = () => new Date().toISOString().slice(0, 7);
+  const quotaError = () => Object.assign(new Error('本月云翻译额度已用完，只能使用本地翻译。请在支持本地翻译的环境中准备语言模型后重试。'),
+    { status: 403, code: 'cloud_quota_exhausted' });
   async function call(method, text, target, textType) {
+    const requestMonth = month();
+    if (exhaustedMonth === requestMonth) throw quotaError();
     if (!config.translatorKey) throw Object.assign(new Error('请在 .env 中配置 TRANSLATOR_KEY。'), { status: 503 });
     const url = new URL(method, `${config.translatorEndpoint.replace(/\/$/, '')}/`);
     url.searchParams.set('api-version', '3.0');
@@ -78,6 +84,12 @@ function createTranslator(config) {
       signal: AbortSignal.timeout(25000),
     });
     if (!response.ok) {
+      // Azure enforces the resource-wide F0 quota, including other clients.
+      const failure = await response.json().catch(() => null);
+      if (String(failure?.error?.code) === '403001') {
+        exhaustedMonth = requestMonth;
+        throw quotaError();
+      }
       const message = response.status === 429 ? '翻译请求过于频繁，请稍后重试。'
         : [401, 403].includes(response.status) ? '翻译服务认证失败，请检查 Key 和资源区域。'
           : `翻译服务暂时不可用（HTTP ${response.status}）。`;

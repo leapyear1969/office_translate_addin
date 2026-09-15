@@ -1,3 +1,4 @@
+import { tryLocalRequest } from './local-translator';
 export interface UserProfile { id: string; displayName: string; mail: string; tenantId: string; photo?: string }
 export interface Session { token: string; user: UserProfile }
 declare const OfficeRuntime: { auth: { getAccessToken(options: { allowSignInPrompt: boolean; allowConsentPrompt: boolean }): Promise<string> } };
@@ -51,6 +52,14 @@ function getSsoToken(interactive: boolean): Promise<string> {
 }
 
 export async function api<T>(path: string, token: string, body?: unknown): Promise<T> {
+  const local = await tryLocalRequest(path, body);
+  const translation = ['/api/detect', '/api/translate', '/api/translate/word'].includes(path);
+  const providerStatus = translation && typeof document !== 'undefined' ? document.getElementById('local-model-status') : null;
+  if (local !== undefined) {
+    if (providerStatus) providerStatus.textContent = '本次使用本地模型，未消耗云翻译额度。';
+    return local as T;
+  }
+  if (providerStatus) providerStatus.textContent = '本地模型暂不可用，本次使用 Azure F0 云翻译。';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 110000);
   try {
@@ -69,6 +78,7 @@ export async function api<T>(path: string, token: string, body?: unknown): Promi
     });
     if (response.status === 401 && cachedSession?.session.token === token) clearAuthentication();
     const result = await response.json();
+    if (providerStatus && result?.code === 'cloud_quota_exhausted') providerStatus.textContent = result.error;
     if (!response.ok) throw Object.assign(new Error(result.error || `请求失败（${response.status}）。`), { code: result.code });
     return result as T;
   } catch (error) {

@@ -89,3 +89,9 @@ summary{cursor:pointer;color:#526b8b}
 .document-maintenance>button{margin-top:8px}
 
 .translation-text::placeholder,.preview-hint,#source-count{font-size:12px}
+
+.local-translation{margin-top:16px;padding-top:12px;border-top:1px solid #e5e5e5;font-size:12px;overflow-wrap:anywhere}
+.local-translation summary{cursor:pointer;font-weight:600}
+.local-translation label{display:block;margin-top:8px}
+.local-translation select{display:block;width:100%;min-width:0;margin:4px 0 8px}
+.local-translation button{max-width:100%;white-space:normal;margin:4px 0}

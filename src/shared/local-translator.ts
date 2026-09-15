@@ -9,9 +9,13 @@ interface Session {
   destroy(): void;
 }
 interface Pair { sourceLanguage: string; targetLanguage: string }
+interface ModelOptions {
+  signal: AbortSignal;
+  monitor?: (monitor: { addEventListener(type: 'downloadprogress', listener: (event: { loaded: number; total?: number }) => void): void }) => void;
+}
 interface Models {
-  LanguageDetector?: { availability(): Promise<Availability>; create(options: { signal: AbortSignal }): Promise<Detector> };
-  Translator?: { availability(pair: Pair): Promise<Availability>; create(pair: Pair & { signal: AbortSignal }): Promise<Session> };
+  LanguageDetector?: { availability(): Promise<Availability>; create(options: ModelOptions): Promise<Detector> };
+  Translator?: { availability(pair: Pair): Promise<Availability>; create(pair: Pair & ModelOptions): Promise<Session> };
 }
 const models = () => globalThis as unknown as Models;
 const unavailable = () => new Error('本地翻译暂不可用');
@@ -115,12 +119,23 @@ export async function tryLocalRequest(path: string, body: unknown): Promise<unkn
 export function setupLocalModels(): void {
   const button = document.getElementById('prepare-local-models') as HTMLButtonElement | null;
   if (!button) return;
+  let progress = document.getElementById('local-model-progress');
+  if (!progress) {
+    progress = document.createElement('div');
+    progress.id = 'local-model-progress';
+    progress.hidden = true;
+    button.after(progress);
+  }
+  const progressContainer = progress;
   for (const [id, selected] of [['local-source', 'en'], ['local-target', 'zh-Hans']]) {
     const select = document.getElementById(id) as HTMLSelectElement;
     select.replaceChildren(...Object.entries(LANGUAGES).map(([code, label]) => new Option(label, code)));
     select.value = selected;
   }
   button.onclick = async () => {
+    if (button.disabled) return;
+    progressContainer.replaceChildren();
+    progressContainer.hidden = true;
     const status = document.getElementById('local-model-status')!;
     const source = (document.getElementById('local-source') as HTMLInputElement).value;
     const target = (document.getElementById('local-target') as HTMLInputElement).value;
@@ -130,13 +145,44 @@ export function setupLocalModels(): void {
     status.textContent = '正在准备本地模型，首次下载可能需要几分钟…';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 300000);
+    progressContainer.hidden = false;
+    const prepare = async <T extends Detector | Session>(name: string, create: (options: ModelOptions) => Promise<T>) => {
+      const row = document.createElement('label');
+      const text = document.createElement('span');
+      const bar = document.createElement('progress');
+      bar.max = 1;
+      bar.setAttribute('aria-label', `${name}下载进度`);
+      text.textContent = `${name}：等待下载进度…`;
+      row.append(text, bar);
+      progressContainer.append(row);
+      let settled = false;
+      try {
+        const model = await create({
+          signal: controller.signal,
+          monitor: monitor => monitor.addEventListener('downloadprogress', event => {
+            if (settled || controller.signal.aborted) return;
+            const total = event.total ?? 1;
+            if (!Number.isFinite(event.loaded) || event.loaded < 0 || !Number.isFinite(total) || total <= 0) return;
+            const fraction = Math.min(1, event.loaded / total);
+            bar.value = Math.max(bar.hasAttribute('value') ? bar.value : 0, fraction);
+            text.textContent = bar.value === 1 ? `${name}：下载完成，正在初始化…` : `${name}：${Math.floor(bar.value * 100)}%`;
+          }),
+        });
+        model.destroy();
+        bar.value = 1;
+        text.textContent = `${name}：已就绪`;
+      } catch (error) {
+        bar.hidden = true;
+        text.textContent = `${name}：准备失败，请重试`;
+        throw error;
+      } finally { settled = true; }
+    };
     try {
       // Start both downloads in the click handler while user activation is present.
       const results = await Promise.allSettled([
-        LanguageDetector.create({ signal: controller.signal }),
-        Translator.create({ sourceLanguage: source, targetLanguage: target, signal: controller.signal }),
+        prepare('语言识别模型', options => LanguageDetector.create(options)),
+        prepare('翻译模型', options => Translator.create({ sourceLanguage: source, targetLanguage: target, ...options })),
       ]);
-      results.forEach(result => { if (result.status === 'fulfilled') result.value.destroy(); });
       status.textContent = results.every(result => result.status === 'fulfilled')
         ? '该语言对的本地模型已就绪，请重新翻译。' : '模型准备失败，请检查语言对、网络或当前 Office 环境权限。';
     } catch { status.textContent = '模型准备失败，请重试。'; }

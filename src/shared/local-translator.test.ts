@@ -131,3 +131,37 @@ test('failed preparation stops its progress indicator and resets on retry', asyn
   expect(document.querySelectorAll('progress')[1].hidden).toBe(false);
   expect(document.getElementById('local-model-status')!.textContent).toContain('已就绪');
 });
+
+test('an immediate failure cancels a stuck peer and preserves the actual error', async () => {
+  document.body.innerHTML = '<select id="local-source"></select><select id="local-target"></select><button id="prepare-local-models"></button><p id="local-model-status"></p>';
+  let finish!: (value: typeof detector) => void;
+  env.LanguageDetector.create.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  env.Translator.create.mockRejectedValue(new DOMException('Permissions policy blocked translator', 'NotAllowedError'));
+  setupLocalModels();
+  const button = document.getElementById('prepare-local-models') as HTMLButtonElement;
+  button.click();
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(button.disabled).toBe(false);
+  expect(document.getElementById('local-model-status')!.textContent).toContain('未授予本地模型权限');
+  expect(document.getElementById('local-model-status')!.textContent).toContain('Permissions policy blocked translator');
+  expect(document.querySelectorAll('progress')[0].hidden).toBe(true);
+  expect(document.querySelectorAll('progress')[0].parentElement!.textContent).toContain('已停止');
+  finish(detector);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(detector.destroy).toHaveBeenCalledTimes(1);
+  expect(document.querySelectorAll('progress')[0].parentElement!.textContent).toContain('已停止');
+});
+
+test('preparation timeout restores retry even if native APIs ignore abort', async () => {
+  jest.useFakeTimers();
+  document.body.innerHTML = '<select id="local-source"></select><select id="local-target"></select><button id="prepare-local-models"></button><p id="local-model-status"></p>';
+  env.LanguageDetector.create.mockReturnValue(new Promise(() => {}));
+  env.Translator.create.mockReturnValue(new Promise(() => {}));
+  setupLocalModels();
+  const button = document.getElementById('prepare-local-models') as HTMLButtonElement;
+  button.click();
+  await jest.advanceTimersByTimeAsync(300001);
+  expect(button.disabled).toBe(false);
+  expect(document.getElementById('local-model-status')!.textContent).toContain('超时');
+  expect(Array.from(document.querySelectorAll('progress')).every(bar => bar.hidden)).toBe(true);
+});

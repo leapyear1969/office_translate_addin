@@ -19,6 +19,18 @@ interface Models {
 }
 const models = () => globalThis as unknown as Models;
 const unavailable = () => new Error('本地翻译暂不可用');
+function preparationError(error: unknown): string {
+  const { name = '', message = '' } = (error && typeof error === 'object' ? error : {}) as { name?: string; message?: string };
+  const detail = `${name}: ${message}`;
+  let hint = '模型准备失败';
+  if (name === 'TimeoutError') hint = '模型准备超时，请检查网络后重试';
+  else if (/permission.?policy|permissions policy/i.test(detail)) hint = '当前 Office 宿主未授予本地模型权限';
+  else if (/user activation|user gesture/i.test(detail)) hint = '模型下载需要点击授权，请重新点击准备按钮';
+  else if (name === 'NotAllowedError' || name === 'SecurityError') hint = '当前环境拒绝使用本地模型，请检查宿主权限或组织策略';
+  else if (name === 'NotSupportedError') hint = '当前环境不支持该语言对或本地模型';
+  else if (name === 'NetworkError') hint = '模型下载网络异常，请检查网络后重试';
+  return message ? `${hint}（${detail.slice(0, 500)}）` : hint;
+}
 function usable(state: Availability) {
   return state === 'available' || ((state === 'downloadable' || state === 'downloading')
     && typeof navigator !== 'undefined' && navigator.userActivation?.isActive);
@@ -144,7 +156,7 @@ export function setupLocalModels(): void {
     button.disabled = true;
     status.textContent = '正在准备本地模型，首次下载可能需要几分钟…';
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 300000);
+    const timer = setTimeout(() => controller.abort(new DOMException('等待模型超过 5 分钟', 'TimeoutError')), 300000);
     progressContainer.hidden = false;
     const prepare = async <T extends Detector | Session>(name: string, create: (options: ModelOptions) => Promise<T>) => {
       const row = document.createElement('label');
@@ -156,8 +168,17 @@ export function setupLocalModels(): void {
       row.append(text, bar);
       progressContainer.append(row);
       let settled = false;
+      const onAbort = () => {
+        if (settled) return;
+        bar.hidden = true;
+        text.textContent = `${name}：${controller.signal.reason?.name === 'TimeoutError' ? '准备超时，请重试' : '已停止，可重新准备'}`;
+      };
+      let rejectAbort!: (reason: unknown) => void;
+      const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+      const abort = () => { onAbort(); rejectAbort(controller.signal.reason); };
+      controller.signal.addEventListener('abort', abort, { once: true });
       try {
-        const model = await create({
+        const creation = create({
           signal: controller.signal,
           monitor: monitor => monitor.addEventListener('downloadprogress', event => {
             if (settled || controller.signal.aborted) return;
@@ -167,25 +188,29 @@ export function setupLocalModels(): void {
             bar.value = Math.max(bar.hasAttribute('value') ? bar.value : 0, fraction);
             text.textContent = bar.value === 1 ? `${name}：下载完成，正在初始化…` : `${name}：${Math.floor(bar.value * 100)}%`;
           }),
+        }).then(model => {
+          // Dispose even when the browser finishes after cancellation or timeout.
+          model.destroy();
         });
-        model.destroy();
+        await Promise.race([creation, aborted]);
         bar.value = 1;
         text.textContent = `${name}：已就绪`;
       } catch (error) {
         bar.hidden = true;
-        text.textContent = `${name}：准备失败，请重试`;
+        if (!controller.signal.aborted) text.textContent = `${name}：${preparationError(error)}`;
         throw error;
-      } finally { settled = true; }
+      } finally { settled = true; controller.signal.removeEventListener('abort', abort); }
     };
     try {
       // Start both downloads in the click handler while user activation is present.
-      const results = await Promise.allSettled([
+      await Promise.all([
         prepare('语言识别模型', options => LanguageDetector.create(options)),
         prepare('翻译模型', options => Translator.create({ sourceLanguage: source, targetLanguage: target, ...options })),
       ]);
-      status.textContent = results.every(result => result.status === 'fulfilled')
-        ? '该语言对的本地模型已就绪，请重新翻译。' : '模型准备失败，请检查语言对、网络或当前 Office 环境权限。';
-    } catch { status.textContent = '模型准备失败，请重试。'; }
+      status.textContent = '该语言对的本地模型已就绪，请重新翻译。';
+    } catch (error) {
+      status.textContent = `${preparationError(error)}。本地模型未就绪，翻译时将尝试使用 Azure F0。`;
+    }
     finally { clearTimeout(timer); controller.abort(); button.disabled = false; }
   };
 }

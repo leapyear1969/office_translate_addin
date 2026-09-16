@@ -1,4 +1,3 @@
-import { setupLocalModels } from '../shared/local-translator';
 import { setupAccount } from '../shared/account';
 import { api, authenticate, Session } from '../shared/api';
 import { requestConsent } from '../shared/consent';
@@ -6,7 +5,6 @@ import { bodyHtml, currentItem, isCurrent, notifyOriginalDisplayed, showOriginal
 import { LANGUAGES, loadSettings, saveSettings, Settings, shouldOfferTranslation } from '../shared/settings';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-setupLocalModels();
 const target = element<HTMLSelectElement>('target-language');
 const excluded = element<HTMLSelectElement>('excluded-languages');
 const picker = element<HTMLSelectElement>('new-language');

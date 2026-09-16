@@ -1,4 +1,3 @@
-import { setupLocalModels } from '../shared/local-translator';
 import { setupAccount } from '../shared/account';
 import { rememberPaneWidth } from './pane-width';
 import { authenticate, Session } from '../shared/api';
@@ -13,7 +12,6 @@ import { copyTranslation } from './clipboard';
 import { capturePreview, translatePreview, PreviewRange, EmptySelectionError } from './preview';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-setupLocalModels();
 const target = element<HTMLSelectElement>('target-language');
 let settings: WordSettings = { target: 'zh-Hans' };
 let activeScope: 'selection' | 'paragraph' = 'selection';

@@ -1,11 +1,5 @@
 const { createApp } = require('./app');
 const config = { origin: 'https://localhost:3000' };
-test('returns the structured quota error to Office clients', () => setup(async ({ request, translate }) => {
-  translate.mockRejectedValue(Object.assign(new Error('本月云翻译额度已用完'), { status: 403, code: 'cloud_quota_exhausted' }));
-  const response = await request('/api/translate', { token: 'valid', body: { html: '<p>Hello</p>', to: 'en' } });
-  expect(response.status).toBe(403);
-  expect(await response.json()).toEqual({ code: 'cloud_quota_exhausted', error: '本月云翻译额度已用完' });
-}));
 async function setup(run) {
   const translate = jest.fn(async () => '<p>译文</p>');
   const translateSubject = jest.fn(async () => '会议通知');

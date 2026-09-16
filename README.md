@@ -105,13 +105,21 @@ https://login.partner.microsoftonline.cn/CUSTOMER_TENANT_ID/adminconsent?client_
 
 | .env 字段 | 用途 |
 |---|---|
+| LOCAL_TRANSLATOR_ENDPOINT | 默认 http://192.168.3.101:30261，优先调用 FastAPI + Argos；显式留空时仅使用 Azure |
+| LOCAL_TRANSLATOR_FALLBACK | 默认 true，本地失败或不支持该语言时回退到已配置的 Azure；false 为仅本地模式 |
 | TRANSLATOR_ENDPOINT | 默认 https://api.translator.azure.cn/ |
 | TRANSLATOR_KEY | 翻译资源 Key，仅后端读取 |
 | TRANSLATOR_REGION | 资源需要区域认证时，填写门户中准确的区域代码 |
 | APP_BASE_URL | 插件 HTTPS 地址，用于清单生成与 API 来源检查 |
 | SSO_RESOURCE | Entra 应用中实际的 Application ID URI |
 
-翻译时保留 HTML 元素及属性，只提交可见文本节点；表格、链接、CID 图片和样式不会作为普通文字翻译。script、style、head、noscript、translate=no 和 notranslate 区域跳过。不同 HTML 文本节点分别翻译，因此跨行内标签的句子连贯性可能不如单段纯文本。附件、图片内文字和邮件主题不翻译。
+FastAPI + Argos 由 Node 后端通过内网访问，Office 客户端继续使用原有 HTTPS 同源接口，不需要访问 30261 端口。后端读取 `/languages`（缓存 60 秒），以 `{text, source, target}` 调用 `/translate`，读取 `translated_text`。当前服务器已安装 en ↔ zh，插件的 `zh-Hans` 映射为 `zh`；繁体中文不会被当成简体目标。源语言使用后端 tinyld 离线识别；识别不确定的短文本也会触发 Azure 回退，未配置 Azure Key 或关闭回退时返回错误。离线识别是启发式判断，极短文本及同一文本节点内的混合语言仍可能误判。
+
+本地服务连接和语言列表请求超时为 3 秒，每批翻译最多等待 25 秒。回退开启意味着部分请求可能提交到 Azure；需要全部留在本地时设置 `LOCAL_TRANSLATOR_FALLBACK=false`。本地翻译请求计入现有上游调用统计，离线语言检测和模型列表查询不计入翻译字符数；上游统计合并本地和 Azure 调用，不代表 Azure 计费量。
+
+部署时同步 `server/`、`package.json`、`package-lock.json`，执行 `npm ci --omit=dev`，在服务器 `.env` 设置 `LOCAL_TRANSLATOR_ENDPOINT=http://192.168.3.101:30261` 并重启 Node 服务。此改动无需更新 Office 清单。若 Node 运行在容器内，需确认容器可访问这个内网地址；不要将容器的 localhost 当成宿主机。
+
+翻译时保留 HTML 元素及属性，本地服务只接收可见文本；表格、链接、CID 图片和样式不会作为普通文字翻译。script、style、head、noscript、translate=no 和 notranslate 区域跳过。本地模式中 Word 格式标记在后端重建。不同 HTML 文本节点分别翻译，因此跨行内标签的句子连贯性可能不如单段纯文本。支持邮件主题翻译，附件和图片内文字不翻译。
 
 每批最多 45,000 字符、100 段，每段最多 4,500 UTF-16 单元；大邮件分批完成后才应用译文。输入/输出上限为 1,000,000 字符。译文通过文本节点赋值，尖括号等内容会正确转义。失败或邮件切换时不应用未完成的译文。不把正文、令牌或密钥写入日志或 localStorage。
 

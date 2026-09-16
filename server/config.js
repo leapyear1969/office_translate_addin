@@ -16,6 +16,8 @@ function readConfig(env = process.env) {
     authority: (env.AUTHORITY || 'https://login.partner.microsoftonline.cn').replace(/\/$/, ''),
     graphBase: (env.GRAPH_BASE || 'https://microsoftgraph.chinacloudapi.cn').replace(/\/$/, ''),
     translatorEndpoint: env.TRANSLATOR_ENDPOINT || 'https://api.translator.azure.cn/',
+    localTranslatorEndpoint: env.LOCAL_TRANSLATOR_ENDPOINT === '' ? '' : (env.LOCAL_TRANSLATOR_ENDPOINT || 'http://192.168.3.101:30261'),
+    localTranslatorFallback: env.LOCAL_TRANSLATOR_FALLBACK !== 'false',
     translatorKey: env.TRANSLATOR_KEY || '', translatorRegion: env.TRANSLATOR_REGION || '',
   };
 }

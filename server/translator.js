@@ -1,5 +1,6 @@
 const cheerio = require('cheerio/slim');
 const { recordRequest } = require('./analytics');
+const { createLocalTranslator } = require('./local-translator');
 
 function content(html) {
   const $ = cheerio.load(html, { xml: { xmlMode: false, decodeEntities: true, encodeEntities: 'utf8' } });
@@ -63,7 +64,33 @@ async function detectHtml(html, detect) {
 }
 
 function createTranslator(config) {
+  const local = config.localTranslatorEndpoint ? createLocalTranslator(config) : null;
   async function call(method, text, target, textType) {
+    if (local) {
+      try {
+        if (method === 'detect') {
+          const result = local.detect(text[0]);
+          // Keep the existing Outlook confidence threshold and language codes.
+          if ((!result || result.score < 0.7) && config.localTranslatorFallback !== false && config.translatorKey) {
+            return callAzure(method, text, target, textType);
+          }
+          if (result) return [{ ...result, language: result.language === 'zh' ? 'zh-Hans' : result.language }];
+          return [{ language: 'und', score: 0 }];
+        }
+        const values = [];
+        const deadline = Date.now() + 25000;
+        const translateLocal = (texts, to) => local.translate(texts, to, deadline);
+        if (textType === 'html') {
+          for (const html of text) values.push(await translateHtml(html, target, translateLocal));
+        } else values.push(...await translateLocal(text, target));
+        return values.map(value => ({ translations: [{ text: value }] }));
+      } catch (error) {
+        if (config.localTranslatorFallback === false || !config.translatorKey) throw error;
+      }
+    }
+    return callAzure(method, text, target, textType);
+  }
+  async function callAzure(method, text, target, textType) {
     if (!config.translatorKey) throw Object.assign(new Error('请在 .env 中配置 TRANSLATOR_KEY。'), { status: 503 });
     const url = new URL(method, `${config.translatorEndpoint.replace(/\/$/, '')}/`);
     url.searchParams.set('api-version', '3.0');
